@@ -116,13 +116,77 @@ export default function OfflineApp() {
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [tempStockValue, setTempStockValue] = useState<string>('');
 
+  // Admin and Auth Management States
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [adminEmail, setAdminEmail] = useState<string>('');
+  const [adminPassword, setAdminPassword] = useState<string>('');
+  const [authError, setAuthError] = useState<string>('');
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+
+  // Product adding / onboarding states
+  const [categories, setCategories] = useState<any[]>([]);
+  const [showAddProductModal, setShowAddProductModal] = useState<boolean>(false);
+  const [newProdName, setNewProdName] = useState<string>('');
+  const [newProdTagline, setNewProdTagline] = useState<string>('');
+  const [newProdDesc, setNewProdDesc] = useState<string>('');
+  const [newProdCategoryId, setNewProdCategoryId] = useState<string>('');
+  const [newProdSpiceLevel, setNewProdSpiceLevel] = useState<string>('None');
+  const [newProdIsVegan, setNewProdIsVegan] = useState<boolean>(false);
+  const [newProdIsSponsored, setNewProdIsSponsored] = useState<boolean>(false);
+  const [newProdWeight, setNewProdWeight] = useState<string>('');
+  const [newProdPrice, setNewProdPrice] = useState<number>(0);
+  const [newProdMrp, setNewProdMrp] = useState<number>(0);
+  const [newProdStock, setNewProdStock] = useState<number>(0);
+  const [newProdAddToWebsite, setNewProdAddToWebsite] = useState<boolean>(true);
+
+  // Additional admin-level fields to exactly mirror the admin panel product modal
+  const [newProdGstRate, setNewProdGstRate] = useState<number>(5);
+  const [newProdBenefits, setNewProdBenefits] = useState<string>('');
+  const [newProdHowToUse, setNewProdHowToUse] = useState<string>('');
+  const [newProdIngredients, setNewProdIngredients] = useState<string>('');
+  const [newProdMetaTitle, setNewProdMetaTitle] = useState<string>('');
+  const [newProdMetaDescription, setNewProdMetaDescription] = useState<string>('');
+  const [newProdMetaKeywords, setNewProdMetaKeywords] = useState<string>('');
+  const [newProdVideoUrl, setNewProdVideoUrl] = useState<string>('');
+
+  // Partial Payment management states
+  const [selectedOrderIdForPayment, setSelectedOrderIdForPayment] = useState<string | null>(null);
+  const [tempPaymentAmount, setTempPaymentAmount] = useState<string>('');
+  const [partialPaidInput, setPartialPaidInput] = useState<string>('');
+
   // Notifications / SQL Banner
   const [showSqlGuide, setShowSqlGuide] = useState<boolean>(false);
   const [globalBanner, setGlobalBanner] = useState<{type: 'success' | 'info' | 'error', text: string} | null>(null);
 
-  // Load Initial Data
+  // Admin Privilege Session Validation
   useEffect(() => {
-    fetchInitialData();
+    const checkAuthOnStart = async () => {
+      setAuthChecking(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          if (profile && (profile.is_admin === true || profile.role === 'admin')) {
+            setIsAdminLoggedIn(true);
+            fetchInitialData();
+          } else {
+            setIsAdminLoggedIn(false);
+          }
+        } else {
+          setIsAdminLoggedIn(false);
+        }
+      } catch (e) {
+        console.warn("Session check failed:", e);
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+    checkAuthOnStart();
   }, []);
 
   // Sync / Ask detection mechanics
@@ -178,6 +242,25 @@ export default function OfflineApp() {
       ]);
     }
 
+    // Load Categories
+    try {
+      const { data: catData, error: catError } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name', { ascending: true });
+      if (catError) throw catError;
+      if (catData) {
+        setCategories(catData);
+      }
+    } catch (err: any) {
+      console.warn("Categories load failed:", err.message);
+      setCategories([
+        { id: 'cat-premixes', name: 'Premixes' },
+        { id: 'cat-spices', name: 'Spices & Podis' },
+        { id: 'cat-sweets', name: 'Sweets & Snacks' }
+      ]);
+    }
+
     // Load Customers
     try {
       const { data: custData, error: custError } = await supabase
@@ -226,78 +309,8 @@ export default function OfflineApp() {
       if (savedOrders) {
         setOrders(JSON.parse(savedOrders));
       } else {
-        const sampleOrders: OfflineOrder[] = [
-          {
-            id: '134cc1f3',
-            created_at: '2026-04-14T12:50:59Z',
-            customer_id: 'c1',
-            customer_name: 'raj',
-            customer_mobile: '9988776655',
-            customer_address: 'Bangalore, India',
-            items: [
-              { product_id: 'p1', variant_id: 'pv1', name: 'Instant Sambar Premix', price: 304, quantity: 2, net_weight: '250g' }
-            ],
-            subtotal: 608,
-            discount: 0,
-            shipping: 0,
-            additional: 0,
-            total: 608,
-            amount_paid: 608,
-            balance_due: 0,
-            payment_method: 'UPI',
-            payment_status: 'Paid Full',
-            dispatch_status: 'Delivered',
-            staff_name: 'Poornima',
-            notes: 'Handed over directly.'
-          },
-          {
-            id: 'bf29e7e3',
-            created_at: '2026-04-14T12:37:50Z',
-            customer_id: 'c2',
-            customer_name: 'rakshita dutt',
-            customer_mobile: '9123456789',
-            customer_address: 'Mysore, GT Road',
-            items: [
-              { product_id: 'p2', variant_id: 'pv2', name: 'Havikar SattviCool', price: 420, quantity: 1, net_weight: '500g' },
-              { product_id: 'p3', variant_id: 'pv3', name: 'Havikar Signature Hing', price: 200, quantity: 1, net_weight: '50g' }
-            ],
-            subtotal: 620,
-            discount: 0,
-            shipping: 0,
-            additional: 0,
-            total: 620,
-            amount_paid: 620,
-            balance_due: 0,
-            payment_method: 'Cash',
-            payment_status: 'Paid Full',
-            dispatch_status: 'Delivered',
-            staff_name: 'Poornima',
-            notes: 'Taken immediately.'
-          },
-          {
-            id: '1cca17cf',
-            created_at: '2026-04-07T13:12:25Z',
-            customer_id: 'c3',
-            customer_name: 'Shruthi Inamdar',
-            customer_mobile: '8877665544',
-            customer_address: 'Dharwad, Karnataka',
-            items: [
-              { product_id: 'p4', variant_id: 'pv4', name: 'Antina Unde', price: 450, quantity: 1, net_weight: '250g' }
-            ],
-            subtotal: 450,
-            discount: 0,
-            shipping: 0,
-            additional: 0,
-            total: 450,
-            amount_paid: 0,
-            balance_due: 450,
-            payment_method: 'Cash',
-            payment_status: 'Payment Pending',
-            dispatch_status: 'Shipped',
-            staff_name: 'Poornima',
-            notes: 'Pending payment from whole seller.'
-          }
-        ];
+        // User requested: "and in orders dont add orders just keep it blank pls"
+        const sampleOrders: OfflineOrder[] = [];
         setOrders(sampleOrders);
         localStorage.setItem('hav_offline_orders', JSON.stringify(sampleOrders));
       }
@@ -410,6 +423,13 @@ export default function OfflineApp() {
     let customerId = selectedCustomerId;
     let updatedCusts = [...customers];
 
+    // Compute preassigned paid and due totals safely
+    const parsedPartial = parseFloat(partialPaidInput);
+    const resolvedPartialPaid = isNaN(parsedPartial) || parsedPartial < 0 ? finalTotal / 2 : Math.min(finalTotal, parsedPartial);
+
+    const paidAmt = paymentStatus === 'Paid Full' ? finalTotal : (paymentStatus === 'Partial Payment' ? resolvedPartialPaid : 0);
+    const balanceDue = finalTotal - paidAmt;
+
     // If customer is changing details or brand new, handle database update logic
     if (!customerId) {
       // Prompt/Generate brand new offline customer
@@ -419,8 +439,8 @@ export default function OfflineApp() {
         name: customerName,
         mobile: customerMobile,
         is_store: isWholesale,
-        balance_due: paymentStatus !== 'Paid Full' ? (finalTotal - (paymentStatus === 'Partial Payment' ? finalTotal / 2 : 0)) : 0,
-        total_spent: paymentStatus !== 'Payment Pending' ? finalTotal : 0,
+        balance_due: balanceDue,
+        total_spent: paidAmt,
         last_order_date: new Date().toISOString(),
         order_count: 1,
         address: customerAddress,
@@ -446,8 +466,8 @@ export default function OfflineApp() {
         const payloadToUpdate: Partial<OfflineCustomer> = {
           order_count: (customerToUpdate.order_count || 0) + 1,
           last_order_date: new Date().toISOString(),
-          total_spent: (customerToUpdate.total_spent || 0) + (paymentStatus !== 'Payment Pending' ? finalTotal : 0),
-          balance_due: (customerToUpdate.balance_due || 0) + (paymentStatus !== 'Paid Full' ? (finalTotal - (paymentStatus === 'Partial Payment' ? finalTotal / 2 : 0)) : 0),
+          total_spent: (customerToUpdate.total_spent || 0) + paidAmt,
+          balance_due: (customerToUpdate.balance_due || 0) + balanceDue,
         };
 
         if (askSaveAddress) {
@@ -474,8 +494,6 @@ export default function OfflineApp() {
 
     // Build the order record
     const discountVal = overallDiscount;
-    const paidAmt = paymentStatus === 'Paid Full' ? finalTotal : (paymentStatus === 'Partial Payment' ? finalTotal / 2 : 0);
-    const balanceDue = finalTotal - paidAmt;
 
     const newOrder: OfflineOrder = {
       id: 'ord-' + Math.random().toString(36).substr(2, 8),
@@ -525,6 +543,9 @@ export default function OfflineApp() {
     setOriginalCustDetails(null);
     setOverallDiscount(0);
     setShippingCharges(0);
+    setAdditionalCharges(0);
+    setOrderNotes('');
+    setPartialPaidInput('');
     setAdditionalCharges(0);
     setOrderNotes('');
     setPaymentMethod('Cash');
@@ -729,8 +750,253 @@ export default function OfflineApp() {
     }
   };
 
+  // 1. Admin Authentication Handler
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthError('');
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: adminEmail,
+        password: adminPassword
+      });
+      if (error) {
+        setAuthError(error.message);
+        setAuthLoading(false);
+        return;
+      }
+      if (data?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+        if (profile && (profile.is_admin === true || profile.role === 'admin')) {
+          setIsAdminLoggedIn(true);
+          fetchInitialData();
+          setGlobalBanner({ type: 'success', text: "Access Granted. Welcome to Havikar Admin POS Console!" });
+        } else {
+          setAuthError("Access Denied: Only administrative staff are authorized to access the Havikar Offline POS and CRM Register.");
+          await supabase.auth.signOut();
+        }
+      }
+    } catch (e: any) {
+      setAuthError(e.message || "An unexpected authentication error occurred.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // 2. Product Onboarding Handler
+  const handleOnboardNewProduct = async () => {
+    if (!newProdName.trim()) {
+      alert("Product Name is required!");
+      return;
+    }
+    if (!newProdWeight.trim()) {
+      alert("Net Weight/Packaging is required!");
+      return;
+    }
+    if (newProdPrice <= 0) {
+      alert("Offer Price must be greater than 0!");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const generatedProductId = crypto.randomUUID();
+      const generatedVariantId = crypto.randomUUID();
+      const generatedSlug = newProdName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+
+      const newProductRecord: any = {
+        id: generatedProductId,
+        name: newProdName.trim(),
+        tagline: newProdTagline.trim(),
+        description: newProdDesc.trim(),
+        gst_rate: Number(newProdGstRate || 5),
+        image_urls: [],
+        is_vegan: newProdIsVegan,
+        is_sponsored: newProdIsSponsored,
+        spice_level: newProdSpiceLevel,
+        category_id: newProdCategoryId || null,
+        is_active: true,
+        slug: generatedSlug,
+        is_offline_only: !newProdAddToWebsite,
+        benefits: newProdBenefits.trim(),
+        how_to_use: newProdHowToUse.trim(),
+        ingredients: newProdIngredients ? newProdIngredients.split('\n').map(x => x.trim()).filter(Boolean) : [],
+        meta_title: newProdMetaTitle.trim() || newProdName.trim(),
+        meta_description: newProdMetaDescription.trim() || newProdTagline.trim() || newProdName.trim(),
+        meta_keywords: newProdMetaKeywords.trim(),
+        video_url: newProdVideoUrl.trim() || null
+      };
+
+      const newVariantRecord = {
+        id: generatedVariantId,
+        product_id: generatedProductId,
+        net_weight: newProdWeight.trim(),
+        price: Number(newProdPrice),
+        mrp: Number(newProdMrp || newProdPrice),
+        stock_quantity: Number(newProdStock || 0)
+      };
+
+      const newLocalRepresentation = {
+        ...newProductRecord,
+        product_variants: [newVariantRecord]
+      };
+
+      const updatedProducts = [newLocalRepresentation, ...products];
+      setProducts(updatedProducts);
+
+      let syncedWithDb = false;
+      if (dbStatus === 'connected') {
+        try {
+          const { error: pErr } = await supabase.from('products').insert(newProductRecord);
+          if (pErr) throw pErr;
+
+          const { error: vErr } = await supabase.from('product_variants').insert(newVariantRecord);
+          if (vErr) throw vErr;
+
+          syncedWithDb = true;
+        } catch (dbErr: any) {
+          console.error("Failed to insert product in Supabase:", dbErr);
+          if (dbErr.message?.includes('is_offline_only')) {
+            const { is_offline_only, ...cleanProductRecord } = newProductRecord;
+            try {
+              await supabase.from('products').insert(cleanProductRecord);
+              await supabase.from('product_variants').insert(newVariantRecord);
+              syncedWithDb = true;
+              setGlobalBanner({ type: 'info', text: "Product added but 'is_offline_only' was omitted. Please run the SQL alter table query from SQL Fix drawer." });
+            } catch (retryErr: any) {
+              console.error("Retry insert failed:", retryErr);
+              alert("Failed to save to online DB: " + retryErr.message);
+            }
+          } else {
+            alert("Failed to save to online DB: " + dbErr.message);
+          }
+        }
+      }
+
+      if (syncedWithDb) {
+        setGlobalBanner({ type: 'success', text: `Successfully onboarded product "${newProdName}"! Stock & Online profile synced.` });
+      } else {
+        setGlobalBanner({ type: 'info', text: `Product "${newProdName}" onboarded locally in offline-safe state. Run SQL Fix to enable complete persistence.` });
+      }
+
+      // Reset Form State
+      setNewProdName('');
+      setNewProdTagline('');
+      setNewProdDesc('');
+      setNewProdCategoryId('');
+      setNewProdSpiceLevel('None');
+      setNewProdIsVegan(false);
+      setNewProdIsSponsored(false);
+      setNewProdWeight('');
+      setNewProdPrice(0);
+      setNewProdMrp(0);
+      setNewProdStock(0);
+      setNewProdAddToWebsite(true);
+      setNewProdGstRate(5);
+      setNewProdBenefits('');
+      setNewProdHowToUse('');
+      setNewProdIngredients('');
+      setNewProdMetaTitle('');
+      setNewProdMetaDescription('');
+      setNewProdMetaKeywords('');
+      setNewProdVideoUrl('');
+      setShowAddProductModal(false);
+
+    } catch (err: any) {
+      alert("Error onboarding product: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. Partial Payment Details Re-calculator Handler
+  const updateOrderPaymentAmount = async (orderId: string, totalPaid: number) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+
+    if (totalPaid < 0) {
+      alert("Amount paid cannot be negative!");
+      return;
+    }
+
+    const oldAmountPaid = order.amount_paid || 0;
+    const oldBalanceDue = order.balance_due || 0;
+
+    const finalPaid = Math.min(order.total, totalPaid);
+    const balanceDue = order.total - finalPaid;
+
+    let nextStatus: 'Paid Full' | 'Partial Payment' | 'Payment Pending' = 'Payment Pending';
+    if (finalPaid >= order.total) {
+      nextStatus = 'Paid Full';
+    } else if (finalPaid > 0) {
+      nextStatus = 'Partial Payment';
+    }
+
+    const updatedOrders = orders.map(o => {
+      if (o.id === orderId) {
+        return {
+          ...o,
+          payment_status: nextStatus,
+          amount_paid: finalPaid,
+          balance_due: balanceDue
+        };
+      }
+      return o;
+    });
+
+    let updatedCustomers = [...customers];
+    if (order.customer_id) {
+      updatedCustomers = customers.map(c => {
+        if (c.id === order.customer_id) {
+          const balanceDiff = balanceDue - oldBalanceDue;
+          const spentDiff = finalPaid - oldAmountPaid;
+          return {
+            ...c,
+            balance_due: Math.max(0, (c.balance_due || 0) + balanceDiff),
+            total_spent: (c.total_spent || 0) + spentDiff
+          };
+        }
+        return c;
+      });
+    }
+
+    setOrders(updatedOrders);
+    setCustomers(updatedCustomers);
+    syncStateToLocal(updatedCustomers, updatedOrders);
+
+    if (dbStatus === 'connected') {
+      try {
+        await supabase.from('offline_orders').update({
+          payment_status: nextStatus,
+          amount_paid: finalPaid,
+          balance_due: balanceDue
+        }).eq('id', orderId);
+
+        if (order.customer_id) {
+          const customerToUpdate = updatedCustomers.find(c => c.id === order.customer_id);
+          if (customerToUpdate) {
+            await supabase.from('offline_customers').update({
+              balance_due: customerToUpdate.balance_due,
+              total_spent: customerToUpdate.total_spent
+            }).eq('id', order.customer_id);
+          }
+        }
+        setGlobalBanner({ type: 'success', text: `Payment status updated for Order #${orderId.split('-').pop()?.toUpperCase()}!` });
+      } catch (e: any) {
+        console.warn("Database sync error during payment update:", e);
+      }
+    } else {
+      setGlobalBanner({ type: 'info', text: "Payment updated in offline-safe state cache." });
+    }
+    setSelectedOrderIdForPayment(null);
+  };
+
   // SQL Script generator for the user
-  const SQL_UPDATE_COMMANDS = `-- EXECUTE THIS IN YOUR SUPABASE SQL EDITOR TO SETUP OFFLINE POS SCHEMAS:
+  const SQL_UPDATE_COMMANDS = `-- EXECUTE THIS IN YOUR SUPABASE SQL EDITOR TO SETUP OFFLINE POS SCHEMAS AND ADMIN ROLES:
 
 -- 1. Create Offline Customers Table
 CREATE TABLE IF NOT EXISTS offline_customers (
@@ -770,13 +1036,109 @@ CREATE TABLE IF NOT EXISTS offline_orders (
     staff_name TEXT DEFAULT 'Poornima'
 );
 
--- Enable RLS & Policies
+-- 3. Update Profiles Schema to fully authorize Admins
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff';
+
+-- 4. Update core Products Table with Onboarding Attributes & Offline Catalog Columns
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_rate INTEGER DEFAULT 5;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_offline_only BOOLEAN DEFAULT false;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS benefits TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS how_to_use TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS ingredients TEXT[] DEFAULT '{}';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS meta_title TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS meta_description TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS meta_keywords TEXT DEFAULT '';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url TEXT DEFAULT NULL;
+
+-- 5. Enable Row Level Security (RLS) & Policies for offline operations
 ALTER TABLE offline_customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE offline_orders ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public read/write offline customers" ON offline_customers;
+DROP POLICY IF EXISTS "Allow public read/write offline orders" ON offline_orders;
 
 CREATE POLICY "Allow public read/write offline customers" ON offline_customers FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL USING (true) WITH CHECK (true);
 `;
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-hav-cream flex flex-col items-center justify-center font-sans">
+        <RefreshCw className="w-10 h-10 text-hav-forest animate-spin mb-4" />
+        <span className="text-xs font-black uppercase tracking-widest text-hav-olive">Checking Administrator Session...</span>
+      </div>
+    );
+  }
+
+  if (!isAdminLoggedIn) {
+    return (
+      <div className="min-h-screen bg-hav-cream flex items-center justify-center px-4 font-sans select-none selection:bg-hav-gold/30">
+        <div className="bg-white p-8 md:p-12 rounded-[2.5rem] border border-hav-gold/15 shadow-2xl w-full max-w-md space-y-6">
+          <div className="text-center">
+            <div className="w-14 h-14 bg-hav-forest text-hav-gold flex items-center justify-center rounded-3xl mx-auto mb-4 border border-hav-gold/20 font-black text-xl">
+              🔑
+            </div>
+            <h2 className="text-2xl font-serif font-black text-hav-forest">Havikar POS Register</h2>
+            <p className="text-[10px] font-black uppercase tracking-widest text-hav-gold mt-1">Administrative Authorization Required</p>
+          </div>
+
+          {authError && (
+            <div className="bg-rose-50 border border-rose-150 p-4 rounded-2xl text-rose-700 text-xs font-semibold leading-relaxed">
+              ⚠️ {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleAdminLogin} className="space-y-4">
+            <div>
+              <label className="text-[10px] font-black uppercase text-hav-gold block mb-1">Admin Email Address</label>
+              <input 
+                type="email"
+                required
+                value={adminEmail}
+                onChange={e => setAdminEmail(e.target.value)}
+                placeholder="admin@havikar.com"
+                className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-bold text-hav-brown focus:outline-none focus:ring-2 focus:ring-hav-gold/50"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black uppercase text-hav-gold block mb-1">Secure Password</label>
+              <input 
+                type="password"
+                required
+                value={adminPassword}
+                onChange={e => setAdminPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-bold text-hav-brown focus:outline-none focus:ring-2 focus:ring-hav-gold/50"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full bg-hav-forest text-hav-gold hover:text-hav-forest hover:bg-hav-gold border border-hav-gold/30 disabled:bg-gray-400 disabled:text-gray-200 disabled:border-none font-black py-3.5 px-8 rounded-xl tracking-widest uppercase text-xs cursor-pointer shadow-xl transition-all flex justify-center items-center gap-2"
+            >
+              {authLoading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Verifying...
+                </>
+              ) : (
+                "Authorize and Enter POS"
+              )}
+            </button>
+          </form>
+
+          <p className="text-center text-[10px] text-hav-olive opacity-80 mt-4 leading-normal">
+            Only admin profiles with the <code>is_admin</code> attribute flag active are allowed to manage sales registries and CRM catalogs. Contact Ananth if you need administrator clearance.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const selectedOrderForPayment = orders.find(o => o.id === selectedOrderIdForPayment);
 
   return (
     <div className="min-h-screen bg-hav-cream text-hav-olive flex flex-col font-sans select-none selection:bg-hav-gold/30">
@@ -1137,6 +1499,19 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                       </button>
                     ))}
                   </div>
+
+                  {paymentStatus === 'Partial Payment' && (
+                    <div className="mt-3 p-3 bg-orange-50/50 rounded-xl border border-orange-200/50 animate-fadeIn">
+                      <label className="text-[9px] font-black uppercase text-orange-850 block mb-1">Amount Paid Now (₹)</label>
+                      <input 
+                        type="number"
+                        value={partialPaidInput}
+                        onChange={e => setPartialPaidInput(e.target.value)}
+                        placeholder="Default is half of grand total"
+                        className="w-full bg-white border border-orange-200 rounded-lg py-1.5 px-3 text-xs text-hav-brown font-bold focus:outline-none focus:ring-1 focus:ring-orange-300"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1428,22 +1803,42 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
             {/* List of queue orders */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredQueueOrders.length === 0 ? (
-                <div className="col-span-full bg-white p-16 rounded-[2rem] text-center text-hav-brown/60 italic border border-hav-olive/5">
-                  📭 No orders found matching the filter selection in active registry.
+                <div className="col-span-full bg-white p-12 py-16 rounded-[2.5rem] text-center border border-hav-olive/10 shadow-md space-y-4 max-w-lg mx-auto my-6 animate-fadeIn">
+                  <div className="w-16 h-16 bg-hav-cream text-hav-gold rounded-full flex items-center justify-center text-3xl mx-auto border border-hav-gold/15 shadow-sm">
+                    📭
+                  </div>
+                  <div>
+                    <h3 className="text-base font-serif font-black text-hav-forest">No Orders in Active Registry</h3>
+                    <p className="text-xs text-hav-olive mt-1 max-w-sm mx-auto leading-relaxed">
+                      There are currently no active orders matching this filter in the POS queue. Hit the button below or use "New Sale" tab to start a transaction.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('new_sale')}
+                    className="px-6 py-2 bg-hav-forest hover:bg-hav-gold text-hav-gold hover:text-hav-forest border border-hav-gold/20 text-xs font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer inline-block shadow-sm"
+                  >
+                    ➕ Start New Sale
+                  </button>
                 </div>
               ) : (
                 filteredQueueOrders.map((order) => {
                   const itemsCount = order.items.reduce((acc, i) => acc + i.quantity, 0);
                   const isDelivered = order.dispatch_status === 'Delivered';
                   const isShipped = order.dispatch_status === 'Shipped';
-                  const isPendingPayment = order.payment_status === 'Payment Pending';
+                  const isPartialPayment = order.payment_status === 'Partial Payment';
+                  const isPendingPayment = order.payment_status === 'Payment Pending' || isPartialPayment;
 
                   return (
                     <div 
                       key={order.id} 
-                      className={`bg-white rounded-[2rem] p-6 shadow-md border flex flex-col justify-between transition-all duration-300 hover:shadow-xl hover:scale-[1.01] ${
+                      onClick={() => {
+                        setSelectedOrderIdForPayment(order.id);
+                        setTempPaymentAmount(order.amount_paid.toString());
+                      }}
+                      className={`bg-white rounded-[2rem] p-6 shadow-md border flex flex-col justify-between transition-all duration-300 hover:shadow-xl hover:scale-[1.01] cursor-pointer ${
                         order.dispatch_status === 'Cancelled' ? 'border-red-100 opacity-60' :
-                        isDelivered ? 'border-emerald-100 bg-emerald-50/5' : 'border-hav-gold/20'
+                        isDelivered ? 'border-emerald-100 bg-emerald-50/5' : 
+                        isPartialPayment ? 'border-orange-400 bg-amber-50/30 ring-4 ring-orange-300/15' : 'border-hav-gold/20'
                       }`}
                     >
                       {/* Card block details */}
@@ -1496,11 +1891,18 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                       <div className="space-y-4">
                         <div className="flex justify-between items-center border-t border-hav-cream pt-3 text-xs">
                           <span className="text-[10px] font-black uppercase tracking-wider text-hav-brown opacity-75">
-                            {order.payment_method} • {order.payment_status}
+                            {order.payment_method} • {isPartialPayment ? 'Payment Pending' : order.payment_status}
                           </span>
-                          <span className="text-base font-black text-hav-forest">
-                            ₹{order.total}
-                          </span>
+                          <div className="text-right">
+                            <span className="text-base font-black text-hav-forest block">
+                              ₹{order.total}
+                            </span>
+                            {isPartialPayment && (
+                              <span className="text-[9px] text-neutral-500 block">
+                                (Paid: ₹{order.amount_paid} | Due: ₹{order.balance_due})
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Order status badges */}
@@ -1514,9 +1916,9 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                           </span>
                           <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
                             order.payment_status === 'Paid Full' ? 'bg-emerald-100 text-emerald-800' :
-                            order.payment_status === 'Partial Payment' ? 'bg-orange-100 text-orange-800' : 'bg-red-100 text-red-800'
+                            isPartialPayment ? 'bg-orange-100 text-orange-900 border border-orange-250 animate-pulse font-black ring-2 ring-orange-200/50' : 'bg-red-100 text-red-800'
                           }`}>
-                            💰 {order.payment_status}
+                            💰 {isPartialPayment ? 'Payment Pending' : order.payment_status}
                           </span>
                         </div>
 
@@ -1532,19 +1934,19 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                           {isDelivered ? (
                             <>
                               <button 
-                                onClick={() => updateOrderPaymentStatus(order.id, 'Paid Full')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderPaymentStatus(order.id, 'Paid Full'); }}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black py-2.5 px-1.5 rounded-xl uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
                               >
                                 Paid Full
                               </button>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Shipped')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Shipped'); }}
                                 className="bg-hav-cream/60 hover:bg-hav-cream text-hav-forest text-[9px] font-black py-2.5 px-1.5 rounded-xl uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
                               >
                                 Unmark Delivered
                               </button>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Cancelled')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Cancelled'); }}
                                 className="col-span-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[9px] font-black py-2 px-1.5 rounded-xl uppercase tracking-wider transition-colors border border-rose-150 cursor-pointer"
                               >
                                 Return/Refund Item
@@ -1553,38 +1955,38 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                           ) : isShipped ? (
                             <>
                               <button 
-                                onClick={() => triggerWhatsApp(order)}
+                                onClick={(e) => { e.stopPropagation(); triggerWhatsApp(order); }}
                                 className="bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
                               >
                                 <Send className="w-3.5 h-3.5" />
                                 Send Message
                               </button>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Taken in Store')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Taken in Store'); }}
                                 className="bg-hav-cream hover:bg-hav-cream/80 text-hav-forest text-[9px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-all shadow-sm cursor-pointer"
                               >
                                 Unmark Shipped
                               </button>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Delivered')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Delivered'); }}
                                 className="col-span-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black py-2.5 px-1.5 rounded-xl uppercase tracking-widest transition-colors shadow-md cursor-pointer"
                               >
                                 Mark Delivered
                               </button>
                               <button 
-                                onClick={() => alert("Marked delivery problem! Flagged for staff review.")}
+                                onClick={(e) => { e.stopPropagation(); alert("Marked delivery problem! Flagged for staff review."); }}
                                 className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 text-[8px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-all border border-yellow-250 cursor-pointer"
                               >
                                 Mark Problem
                               </button>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Cancelled')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Cancelled'); }}
                                 className="bg-red-50 hover:bg-red-100 text-red-600 text-[8px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-all border border-red-150 cursor-pointer"
                               >
                                 Cancel Order
                               </button>
                               <button 
-                                onClick={() => updateOrderPaymentStatus(order.id, 'Paid Full')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderPaymentStatus(order.id, 'Paid Full'); }}
                                 className="col-span-2 bg-teal-50 hover:bg-teal-100 text-teal-800 text-[9px] font-black py-2 px-1 text-center rounded-xl uppercase tracking-widest transition-all border border-teal-150 cursor-pointer"
                               >
                                 Mark as Paid
@@ -1594,19 +1996,19 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                             // Draft or Taken in Store
                             <>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Shipped')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Shipped'); }}
                                 className="bg-hav-forest text-hav-gold hover:bg-hav-forest/90 text-[9px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-all shadow-sm cursor-pointer"
                               >
                                 Dispatch Order
                               </button>
                               <button 
-                                onClick={() => updateOrderDispatchStatus(order.id, 'Delivered')}
+                                onClick={(e) => { e.stopPropagation(); updateOrderDispatchStatus(order.id, 'Delivered'); }}
                                 className="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-all shadow-sm cursor-pointer"
                               >
                                 Direct Handover
                               </button>
                               <button 
-                                onClick={() => triggerWhatsApp(order)}
+                                onClick={(e) => { e.stopPropagation(); triggerWhatsApp(order); }}
                                 className="col-span-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[9px] font-black py-2 px-1 rounded-xl uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5"
                               >
                                 <Send className="w-3 h-3 text-emerald-800" />
@@ -1870,15 +2272,24 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                 <p className="text-xs text-hav-olive opacity-80 mt-1">Realtime inventory levels configuration & syncing</p>
               </div>
 
-              <div className="relative w-full md:w-80">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-hav-brown/40" />
-                <input 
-                  type="text"
-                  value={invSearch}
-                  onChange={e => setInvSearch(e.target.value)}
-                  placeholder="Search store variants..." 
-                  className="w-full bg-hav-cream/30 border border-hav-gold/20 rounded-xl py-2 px-4 pl-9 text-xs font-bold text-hav-olive focus:outline-none"
-                />
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto items-stretch sm:items-center">
+                <button
+                  onClick={() => setShowAddProductModal(true)}
+                  className="bg-hav-forest text-hav-gold hover:text-hav-forest hover:bg-hav-gold border border-hav-gold/30 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                >
+                  ➕ Onboard Product
+                </button>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-hav-brown/40" />
+                  <input 
+                    type="text"
+                    value={invSearch}
+                    onChange={e => setInvSearch(e.target.value)}
+                    placeholder="Search store variants..." 
+                    className="w-full bg-hav-cream/30 border border-hav-gold/20 rounded-xl py-2.5 px-4 pl-9 text-xs font-bold text-hav-olive focus:outline-none focus:ring-2 focus:ring-hav-gold/55"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1968,6 +2379,340 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
           </div>
         )}
       </main>
+
+      {/* Onboard Product Modal */}
+      {showAddProductModal && (
+        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col border border-hav-gold/20 animate-scaleUp">
+            <div className="flex justify-between items-center mb-6 flex-shrink-0">
+              <div>
+                <h3 className="text-2xl md:text-3xl font-serif font-black text-hav-forest">Product Onboarding (POS)</h3>
+                <p className="text-[10px] font-black uppercase tracking-widest text-hav-gold mt-1">Register a new product to store catalog</p>
+              </div>
+              <button 
+                onClick={() => setShowAddProductModal(false)}
+                className="p-2 hover:bg-hav-cream rounded-full transition-colors text-hav-olive"
+              >
+                <X className="w-7 h-7" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 overflow-y-auto pr-2 md:pr-4 flex-grow custom-scrollbar">
+              {/* Left Column: General Info and Attributes */}
+              <div className="space-y-6">
+                <section className="bg-hav-cream/30 p-6 rounded-3xl border border-hav-gold/10 space-y-4">
+                  <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-widest">General Information</h4>
+                  <div className="space-y-4">
+                    <input 
+                      value={newProdName} 
+                      onChange={e => setNewProdName(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="Product Name (e.g. Sambar Powder)" 
+                    />
+                    <input 
+                      value={newProdTagline} 
+                      onChange={e => setNewProdTagline(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="Short Tagline (e.g. Authentic Brahmin Flavor)" 
+                    />
+                    <textarea 
+                      value={newProdDesc} 
+                      onChange={e => setNewProdDesc(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="Full description of the item..." 
+                      rows={3} 
+                    />
+                  </div>
+                </section>
+
+                <section className="bg-hav-forest/5 p-6 rounded-3xl border border-hav-forest/10 space-y-4">
+                  <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-widest">Category & Attributes</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <select 
+                      value={newProdCategoryId} 
+                      onChange={e => setNewProdCategoryId(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-olive focus:outline-none focus:ring-1 focus:ring-hav-gold/40"
+                    >
+                      <option value="">Select Category</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <select 
+                      value={newProdSpiceLevel} 
+                      onChange={e => setNewProdSpiceLevel(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-olive focus:outline-none focus:ring-1 focus:ring-hav-gold/40"
+                    >
+                      <option value="None">No Spice</option>
+                      <option value="Mild">Mild</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Hot">Hot</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 items-center">
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">GST Tax Rate (%)</label>
+                      <select 
+                        value={newProdGstRate} 
+                        onChange={e => setNewProdGstRate(Number(e.target.value))} 
+                        className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 bg-white text-xs font-black text-hav-olive focus:outline-none focus:ring-1 focus:ring-hav-gold/40"
+                      >
+                        <option value={5}>5% (Standard Spices)</option>
+                        <option value={12}>12% (Processed Foods)</option>
+                        <option value={18}>18% (Premium Content)</option>
+                        <option value={0}>0% (Exempt)</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-2 pt-2">
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-black text-hav-olive">
+                        <input 
+                          type="checkbox" 
+                          checked={newProdIsVegan} 
+                          onChange={e => setNewProdIsVegan(e.target.checked)} 
+                          className="rounded text-hav-forest accent-hav-forest w-4 h-4 cursor-pointer"
+                        />
+                        Is Vegan 🌱
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer text-xs font-black text-hav-olive">
+                        <input 
+                          type="checkbox" 
+                          checked={newProdIsSponsored} 
+                          onChange={e => setNewProdIsSponsored(e.target.checked)} 
+                          className="rounded text-hav-forest accent-hav-forest w-4 h-4 cursor-pointer"
+                        />
+                        Staff Favorite ⭐
+                      </label>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="bg-hav-orange-50/50 p-6 rounded-3xl border border-hav-gold/10 space-y-4">
+                  <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-widest">Initial Variant & Sizing</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-forest block mb-1">Packing (Weight/Qty)</label>
+                      <input 
+                        value={newProdWeight} 
+                        onChange={e => setNewProdWeight(e.target.value)} 
+                        className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-3 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                        placeholder="e.g. 250g or 10 packets" 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-forest block mb-1">Store Offer Price (₹)</label>
+                      <input 
+                        type="number" 
+                        value={newProdPrice || ''} 
+                        onChange={e => setNewProdPrice(Number(e.target.value))} 
+                        className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-3 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                        placeholder="e.g. 280" 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-forest block mb-1">MRP Price (₹)</label>
+                      <input 
+                        type="number" 
+                        value={newProdMrp || ''} 
+                        onChange={e => setNewProdMrp(Number(e.target.value))} 
+                        className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-3 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                        placeholder="e.g. 300" 
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-forest block mb-1">Initial Stock Quantity</label>
+                      <input 
+                        type="number" 
+                        value={newProdStock || ''} 
+                        onChange={e => setNewProdStock(Number(e.target.value))} 
+                        className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-3 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                        placeholder="e.g. 50" 
+                      />
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              {/* Right Column: SEO Metadata and Extra Details */}
+              <div className="space-y-6">
+                <section className="bg-white p-6 rounded-3xl border border-hav-gold/20 shadow-sm space-y-4">
+                  <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-widest">SEO & Meta Data</h4>
+                  <div className="space-y-4">
+                    <input 
+                      value={newProdMetaTitle} 
+                      onChange={e => setNewProdMetaTitle(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="SEO Meta Title (defaults to product name)" 
+                    />
+                    <textarea 
+                      value={newProdMetaDescription} 
+                      onChange={e => setNewProdMetaDescription(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="SEO Meta Description" 
+                      rows={2} 
+                    />
+                    <input 
+                      value={newProdMetaKeywords} 
+                      onChange={e => setNewProdMetaKeywords(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="SEO Meta Keywords (comma separated)" 
+                    />
+                  </div>
+                </section>
+
+                <section className="bg-white p-6 rounded-3xl border border-hav-gold/20 shadow-sm space-y-4">
+                  <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-widest">Content & Marketing Details</h4>
+                  <div className="space-y-4">
+                    <input 
+                      value={newProdVideoUrl} 
+                      onChange={e => setNewProdVideoUrl(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="Video URL (YouTube/Vimeo)" 
+                    />
+                    <textarea 
+                      value={newProdBenefits} 
+                      onChange={e => setNewProdBenefits(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="Benefits (one per line)" 
+                      rows={2} 
+                    />
+                    <textarea 
+                      value={newProdHowToUse} 
+                      onChange={e => setNewProdHowToUse(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="How to Use instruction guidelines" 
+                      rows={2} 
+                    />
+                    <textarea 
+                      value={newProdIngredients} 
+                      onChange={e => setNewProdIngredients(e.target.value)} 
+                      className="w-full border border-hav-orange-200 rounded-xl py-2.5 px-4 bg-white text-xs font-black text-hav-brown focus:outline-none focus:ring-1 focus:ring-hav-gold/40 placeholder:text-gray-400" 
+                      placeholder="Ingredients listing (one per line)" 
+                      rows={2} 
+                    />
+                  </div>
+                </section>
+
+                {/* Checkbox requested specifically: ask whether to add to website */}
+                <div className="bg-white p-6 rounded-3xl border border-hav-gold/20 shadow-sm space-y-4">
+                  <h4 className="text-[10px] font-black uppercase text-hav-gold tracking-widest">Store Publishing Clearance</h4>
+                  <div className="p-4 bg-hav-cream/20 rounded-2xl border border-hav-orange-100 flex items-start gap-3">
+                    <input 
+                      type="checkbox" 
+                      id="addToWebsiteCheckbox"
+                      checked={newProdAddToWebsite} 
+                      onChange={e => setNewProdAddToWebsite(e.target.checked)} 
+                      className="w-5 h-5 rounded text-hav-forest accent-hav-forest border-hav-orange-200 shrink-0 mt-0.5 cursor-pointer"
+                    />
+                    <label htmlFor="addToWebsiteCheckbox" className="text-xs cursor-pointer select-none">
+                      <strong className="text-hav-forest font-black block text-[13px]">Publish to Online Store Website?</strong>
+                      <span className="text-[10px] text-hav-olive opacity-85 leading-relaxed mt-1 block">
+                        If checked, this works exactly like the website's admin panel, automatically updating the storefront. If unchecked, the item is local to offline register only!
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-hav-gold/10 flex justify-end gap-3 flex-shrink-0">
+              <button 
+                onClick={() => setShowAddProductModal(false)}
+                className="px-6 py-2.5 bg-gray-50 hover:bg-gray-100 rounded-full font-black text-xs text-gray-400 uppercase tracking-widest transition-all cursor-pointer"
+              >
+                Discard
+              </button>
+              <button 
+                onClick={handleOnboardNewProduct}
+                className="px-6 py-2.5 bg-hav-forest hover:bg-hav-gold text-hav-gold hover:text-hav-forest border border-hav-gold/30 rounded-full font-black text-xs uppercase tracking-widest transition-all cursor-pointer shadow-md"
+              >
+                Onboard & Register Pack
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Update Payment Modal */}
+      {selectedOrderForPayment && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-2xl w-full max-w-sm border border-hav-gold/20 animate-scaleUp">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-serif font-black text-hav-forest flex items-center gap-2">
+                💸 Update Order Payment
+              </h3>
+              <button 
+                onClick={() => setSelectedOrderIdForPayment(null)} 
+                className="p-1.5 hover:bg-hav-cream rounded-full transition-colors text-hav-olive"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-hav-cream/30 rounded-2xl border border-hav-gold/10 space-y-1.5 text-xs text-hav-olive">
+                <p className="flex justify-between"><span className="opacity-80">Reference Code:</span> <strong className="font-mono text-hav-forest">#{selectedOrderForPayment.id.split('-').pop()?.toUpperCase()}</strong></p>
+                <p className="flex justify-between"><span className="opacity-80">Customer:</span> <strong className="capitalize">{selectedOrderForPayment.customer_name}</strong></p>
+                <div className="h-px bg-hav-orange-200/40 my-2" />
+                <p className="flex justify-between text-xs"><span className="opacity-80">Grand Total:</span> <strong className="text-hav-forest">₹{selectedOrderForPayment.total}</strong></p>
+                <p className="flex justify-between text-xs"><span className="opacity-80">Current Amount Paid:</span> <strong className="text-emerald-800">₹{selectedOrderForPayment.amount_paid}</strong></p>
+                <p className="flex justify-between text-xs"><span className="opacity-80">Balance Due:</span> <strong className="text-rose-800 font-extrabold">₹{selectedOrderForPayment.balance_due}</strong></p>
+              </div>
+
+              <div>
+                <label className="text-[9px] font-black uppercase text-hav-gold block mb-1.5 font-sans tracking-wide">Enter Cumulative Amount Paid (₹)</label>
+                <div className="flex gap-2 mb-2">
+                  <input 
+                    type="number"
+                    value={tempPaymentAmount}
+                    onChange={e => setTempPaymentAmount(e.target.value)}
+                    className="flex-grow border border-hav-orange-200 rounded-xl py-2 px-3 bg-white text-xs text-hav-brown font-bold focus:outline-none focus:ring-2 focus:ring-hav-gold/50"
+                    placeholder="e.g. 500"
+                  />
+                  {selectedOrderForPayment.balance_due > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTempPaymentAmount(selectedOrderForPayment.total.toString())}
+                      className="px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      ⚡ Clear All
+                    </button>
+                  )}
+                </div>
+                {selectedOrderForPayment.balance_due > 0 && (
+                  <p className="text-[10px] bg-emerald-50 text-emerald-800 p-2 rounded-xl border border-emerald-100 font-extrabold flex justify-between items-center animate-fadeIn my-2.5">
+                    <span>Outstanding Due: ₹{selectedOrderForPayment.balance_due}</span>
+                    <button
+                      type="button"
+                      onClick={() => setTempPaymentAmount(selectedOrderForPayment.total.toString())}
+                      className="underline text-[9px] uppercase tracking-wider hover:opacity-85"
+                    >
+                      Fill ₹{selectedOrderForPayment.total}
+                    </button>
+                  </p>
+                )}
+                <p className="text-[9px] text-hav-olive opacity-85 mt-2 leading-relaxed">
+                  If this amount is equal to or greater than ₹{selectedOrderForPayment.total}, payment transitions to <strong>Paid Full</strong>. If smaller, it becomes <strong>Partial Payment</strong> (shown as 'Payment Pending').
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button 
+                onClick={() => setSelectedOrderIdForPayment(null)}
+                className="flex-1 py-2.5 bg-gray-50 hover:bg-gray-100 rounded-xl font-black text-[10px] text-gray-500 uppercase tracking-widest transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              <button 
+                onClick={() => updateOrderPaymentAmount(selectedOrderForPayment.id, Number(tempPaymentAmount || 0))}
+                className="flex-1 py-2.5 bg-hav-forest hover:bg-hav-gold text-hav-gold hover:text-hav-forest border border-hav-gold/25 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md cursor-pointer"
+              >
+                Save Payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer footer */}
       <footer className="bg-hav-forest text-hav-cream/60 py-4 px-6 md:px-12 text-center text-[10px] font-black uppercase tracking-widest border-t border-hav-gold/15 flex-shrink-0">

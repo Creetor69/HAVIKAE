@@ -12,8 +12,8 @@ interface ProductCardProps {
   isInWishlist: boolean;
   onAddToWishlist: () => void;
   onRemoveFromWishlist: () => void;
-  isInCompare: boolean;
-  onAddToCompare: () => void;
+  isInCompare?: boolean;
+  onAddToCompare?: () => void;
   onQuickView: (product: Product) => void;
   onAddToCart: (product: Product, selectedVariant: ProductVariant, quantity: number) => void;
   onBuyNow: (product: Product, selectedVariant: ProductVariant, quantity: number) => void;

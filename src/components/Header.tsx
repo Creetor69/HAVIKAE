@@ -93,13 +93,13 @@ const Header: React.FC<HeaderProps> = ({ navigateTo, currentRoute, user, cart, t
 
     return (
         <header className="bg-hav-forest shadow-lg sticky top-0 z-50 border-b border-hav-gold/20">
-            <div className="container mx-auto px-4 flex justify-between items-center py-0.5">
-                <CustomLink page="home" navigateTo={navigateTo} className="focus:outline-none flex items-center group">
+            <div className="max-w-7xl mx-auto px-2 sm:px-4 md:px-6 flex justify-between items-center py-0.5">
+                <CustomLink page="home" navigateTo={navigateTo} className="focus:outline-none flex items-center group -ml-2 sm:-ml-4">
                     <div className="relative">
                         {logoUrl ? (
-                            <img src={logoUrl} alt="Havikar" className="h-20 md:h-32 w-auto transition-all duration-500 ease-in-out group-hover:scale-110 object-contain drop-shadow-[0_0_15px_rgba(201,162,54,0.4)]" width="220" height="110" loading="lazy" />
+                            <img src={logoUrl} alt="Havikar" className="h-14 md:h-18 w-auto transition-all duration-500 ease-in-out group-hover:scale-105 object-contain drop-shadow-[0_0_10px_rgba(201,162,54,0.3)]" width="160" height="72" loading="lazy" />
                         ) : (
-                            <img src="https://someuoatqyrqbkbiqggi.supabase.co/storage/v1/object/public/media/AIEnhancer_logowithoutbg-removebg-preview.png" alt="Havikar" className="h-20 md:h-32 w-auto transition-all duration-500 ease-in-out group-hover:scale-110 object-contain drop-shadow-[0_0_15px_rgba(201,162,54,0.4)]" width="220" height="110" loading="lazy" />
+                            <img src="https://someuoatqyrqbkbiqggi.supabase.co/storage/v1/object/public/media/AIEnhancer_logowithoutbg-removebg-preview.png" alt="Havikar" className="h-14 md:h-18 w-auto transition-all duration-500 ease-in-out group-hover:scale-105 object-contain drop-shadow-[0_0_10px_rgba(201,162,54,0.3)]" width="160" height="72" loading="lazy" />
                         )}
                     </div>
                 </CustomLink>

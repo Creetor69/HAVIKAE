@@ -232,7 +232,7 @@ const App: React.FC = () => {
             ]);
             const getResult = (index: number) => (results[index].status === 'fulfilled' ? (results[index] as any).value.data : null);
             const productsDataDB = getResult(0);
-            if (productsDataDB) setProducts(productsDataDB);
+            if (productsDataDB) setProducts(productsDataDB.filter((p: any) => !p.is_offline_only));
             setPromotionalContent(getResult(1) || []);
             setLegalDocuments(getResult(2) || []);
             setStoreSettings(getResult(3));

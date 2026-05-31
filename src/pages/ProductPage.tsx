@@ -346,8 +346,6 @@ const ProductPage: React.FC<ProductPageProps> = ({ productId, user, navigateTo, 
                     isInWishlist={wishlist.includes(p.id)} 
                     onAddToWishlist={() => addToWishlist(p.id)} 
                     onRemoveFromWishlist={() => removeFromWishlist(p.id)} 
-                    isInCompare={comparisonList.includes(p.id)} 
-                    onAddToCompare={() => addToComparison(p.id)} 
                     onQuickView={openQuickView} 
                     onAddToCart={addToCart} 
                     onBuyNow={onBuyNow} 

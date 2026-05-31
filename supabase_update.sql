@@ -34,10 +34,11 @@ CREATE TABLE IF NOT EXISTS about_sections (
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- 4. Ensure Product SEO fields
+-- 4. Ensure Product SEO fields & offline publishing
 ALTER TABLE products 
 ADD COLUMN IF NOT EXISTS meta_description TEXT,
-ADD COLUMN IF NOT EXISTS meta_keywords TEXT;
+ADD COLUMN IF NOT EXISTS meta_keywords TEXT,
+ADD COLUMN IF NOT EXISTS is_offline_only BOOLEAN DEFAULT FALSE;
 
 -- 5. RLS for about_sections
 ALTER TABLE about_sections ENABLE ROW LEVEL SECURITY;

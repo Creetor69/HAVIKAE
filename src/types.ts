@@ -71,7 +71,7 @@ export type Product = {
     meta_description: string | null;
     meta_keywords: string | null;
     video_url: string | null;
-    slug: string | null;
+    slug?: string | null;
 };
 
 export type ProductInsert = Omit<Product, 'id' | 'created_at' | 'categories' | 'product_variants' | 'average_rating' | 'review_count'> & { id?: string };
