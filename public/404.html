@@ -1,0 +1,28 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Redirecting...</title>
+    <script>
+      // Single Page Apps for GitHub Pages & Static Hosts
+      // This script takes the current URL (which caused a 404),
+      // saves the path, search, and hash to sessionStorage,
+      // and redirects the browser to the root index.html.
+      
+      var path = window.location.pathname;
+      var search = window.location.search;
+      var hash = window.location.hash;
+      
+      // Save the full path we attempted to access
+      sessionStorage.setItem('redirect', path + search + hash);
+      
+      // Redirect to root, App.tsx will handle the routing restoration
+      window.location.replace('/');
+    </script>
+  </head>
+  <body>
+    <p>Redirecting to Havikar...</p>
+  </body>
+</html>

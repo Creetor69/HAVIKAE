@@ -1,0 +1,10 @@
+User-agent: *
+Disallow: /admin
+Disallow: /profile
+Disallow: /checkout
+Disallow: /login
+Disallow: /signup
+Disallow: /wishlist
+Disallow: /compare
+
+Sitemap: https://www.havikar.com/sitemap.xml

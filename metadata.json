@@ -1,0 +1,6 @@
+{
+  "name": "Havikar Official Website",
+  "description": "The official homepage for Havikar, a brand dedicated to preserving traditional South Indian recipes through handmade snacks, spice blends, and herbal drinks, radiating warmth, nostalgia, and purity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

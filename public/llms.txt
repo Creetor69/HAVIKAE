@@ -1,0 +1,13 @@
+version: 1.0
+summary: Havikar is a food brand from Karnataka, India, dedicated to preserving traditional South Indian recipes. We offer 100% natural, healthy, and authentic Indian snacks, spice blends, and herbal drinks. Our products are sattvic, preservative-free, and crafted in small batches to ensure purity and nostalgic flavor. Key products include Antina Unde, Avalakki Chivda, Bisibelebath Powder, and Havishta vacuum-fried chips. Our mission is to bring the "Flavour of Life" from our kitchen to yours, blending heritage with modern health and hygiene standards.
+
+sitemap: https://www.havikar.com/sitemap.xml
+
+nofollow:
+  /admin
+  /profile
+  /checkout
+  /login
+  /signup
+  /wishlist
+  /compare
