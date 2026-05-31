@@ -913,6 +913,28 @@ export default function OfflineApp() {
     }
   };
 
+  const handleClearAllOrders = async () => {
+    if (!window.confirm("Are you sure you want to clear all offline orders from this console and your local registry? This action cannot be undone.")) {
+      return;
+    }
+    try {
+      setLoading(true);
+      // Clear Supabase offline_orders
+      const { error } = await supabase.from('offline_orders').delete().neq('id', 'placeholder-non-existent-id');
+      if (error) {
+        console.warn("Could not wipe server-side offline_orders:", error);
+      }
+      // Clear localStorage
+      localStorage.removeItem('hav_offline_orders');
+      setOrders([]);
+      setGlobalBanner({ type: 'success', text: 'All offline orders successfully cleared from active registry.' });
+    } catch (err: any) {
+      setGlobalBanner({ type: 'error', text: `Failed to completely clear orders: ${err.message}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 3. Partial Payment Details Re-calculator Handler
   const updateOrderPaymentAmount = async (orderId: string, totalPaid: number) => {
     const order = orders.find(o => o.id === orderId);
@@ -1797,6 +1819,17 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                     ))}
                   </select>
                 </div>
+
+                {orders.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllOrders}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-800 border border-red-200 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm md:ml-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Flush Queue
+                  </button>
+                )}
               </div>
             </div>
 
