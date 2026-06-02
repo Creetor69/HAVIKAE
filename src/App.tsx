@@ -41,64 +41,16 @@ type IncrementStockArgs = { p_variant_id: string; p_quantity: number };
 
 const triggerWebsiteOrderWhatsApp = async (order: any, userName: string, userMobile: string) => {
   try {
-    const saved = localStorage.getItem('hav_whatsapp_config');
-    if (!saved) return;
-    const config = JSON.parse(saved);
-    if (!config || !config.phoneNumberId || !config.accessToken) return;
-    if (config.mode !== 'cloud_api' || !config.triggerOnNewOrder) return;
-
-    const phoneId = config.phoneNumberId.trim();
-    const token = config.accessToken.trim();
-    const templateName = (config.templateName || 'hav_orders').trim();
-    const languageCode = (config.languageCode || 'en').trim();
-
-    const rawMobile = userMobile || order.shipping_address?.phone_number || '';
-    const mobileSanitized = rawMobile.replace(/\D/g, '');
-    if (mobileSanitized.length < 10) return;
-    const recipient = mobileSanitized.startsWith('91') || mobileSanitized.length > 10 ? mobileSanitized : '91' + mobileSanitized;
-
-    const isHelloWorld = templateName === 'hello_world';
-    const displayPaymentStatus = order.payment_id || order.payment_method === 'Razorpay' || order.status === 'Payment Received'
-      ? "Paid securely! 💳 Thank you"
-      : `Payment due: ₹${order.total}`;
-
-    const payload: any = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to: recipient,
-      type: "template",
-      template: {
-        name: templateName,
-        language: {
-          code: languageCode
-        }
-      }
-    };
-
-    if (!isHelloWorld) {
-      payload.template.components = [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: userName || order.shipping_address?.name || 'Customer' },
-            { type: "text", text: order.order_number || order.id.split('-')[1]?.toUpperCase() || 'ORDER' },
-            { type: "text", text: `₹${order.total}` },
-            { type: "text", text: displayPaymentStatus }
-          ]
-        }
-      ];
-    }
-
-    console.log(`[WEBSITE] Triggering automatic WhatsApp to customer ${recipient} via proxy`);
-    await fetch(`/api/offline/send-whatsapp`, {
+    console.log(`[WEBSITE] Triggering backend automated WhatsApp for customer: ${userMobile}`);
+    await fetch(`/api/online/send-whatsapp-order`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        phoneId,
-        token,
-        payload
+        order,
+        userName,
+        userMobile
       })
     });
   } catch (err) {
