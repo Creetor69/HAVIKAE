@@ -54,6 +54,14 @@ export type OfflineOrder = {
 
 const DEFAULT_STAFF = ["Poornima", "Ananth", "Karthik", "Sneha"];
 
+const normalizeMobile = (num: string): string => {
+  const cleaned = num.replace(/[^\d]/g, '');
+  if (cleaned.length === 10 && !cleaned.startsWith('91')) {
+    return '91' + cleaned;
+  }
+  return cleaned || num;
+};
+
 export default function OfflineApp() {
   // Navigation tabs
   // Tabs: 'new_sale', 'order_queue', 'customer_crm', 'inventory_sync'
@@ -116,6 +124,50 @@ export default function OfflineApp() {
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [tempStockValue, setTempStockValue] = useState<string>('');
 
+  // WhatsApp Integration states
+  const [whatsappConfig, setWhatsappConfig] = useState<{
+    mode: 'browser' | 'cloud_api';
+    phoneNumberId: string;
+    accessToken: string;
+    templateName: string;
+    languageCode: string;
+    recipientNumbers: string;
+    triggerOnNewOrder: boolean;
+    supportNumber: string;
+  }>(() => {
+    const hardcoded = {
+      mode: 'cloud_api' as const,
+      phoneNumberId: '1066359256570178',
+      accessToken: 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD',
+      templateName: 'hav_order',
+      languageCode: 'en',
+      recipientNumbers: '',
+      triggerOnNewOrder: true,
+      supportNumber: '91829692577'
+    };
+
+    try {
+      const saved = localStorage.getItem('hav_whatsapp_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...hardcoded,
+          recipientNumbers: parsed.recipientNumbers || '',
+          triggerOnNewOrder: parsed.triggerOnNewOrder ?? true
+        };
+      }
+    } catch (e) {
+      console.warn("Could not load WhatsApp config:", e);
+    }
+    return hardcoded;
+  });
+
+  const [showWhatsappSettings, setShowWhatsappSettings] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem('hav_whatsapp_config', JSON.stringify(whatsappConfig));
+  }, [whatsappConfig]);
+
   // Admin and Auth Management States
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
@@ -173,6 +225,14 @@ export default function OfflineApp() {
             .single();
           if (profile && (profile.is_admin === true || profile.role === 'admin')) {
             setIsAdminLoggedIn(true);
+            
+            // Auto bind the active staff to the logged-in administrator's name
+            let adminName = profile.full_name || profile.name || profile.username || session.user.email?.split('@')[0] || 'Poornima';
+            if (adminName && adminName !== 'Poornima') {
+              adminName = adminName.charAt(0).toUpperCase() + adminName.slice(1);
+            }
+            setCurrentStaff(adminName);
+
             fetchInitialData();
           } else {
             setIsAdminLoggedIn(false);
@@ -349,6 +409,93 @@ export default function OfflineApp() {
     setCustSearchVal('');
   };
 
+  const handleSaveCustomerDetails = async () => {
+    if (!customerName.trim()) {
+      setGlobalBanner({ type: 'warning', text: "Customer Name is required to save details!" });
+      return;
+    }
+    if (!customerMobile.trim()) {
+      setGlobalBanner({ type: 'warning', text: "Customer Mobile number is required!" });
+      return;
+    }
+
+    const normalizedMobileNum = normalizeMobile(customerMobile);
+
+    try {
+      setLoading(true);
+      let updatedCusts = [...customers];
+      let cid = selectedCustomerId;
+
+      const payloadToUpdate: OfflineCustomer = {
+        id: cid || 'cust-' + Math.random().toString(36).substr(2, 8),
+        created_at: new Date().toISOString(),
+        name: customerName.trim(),
+        mobile: normalizedMobileNum,
+        address: customerAddress.trim(),
+        is_store: isWholesale,
+        balance_due: 0,
+        total_spent: 0,
+        last_order_date: null,
+        order_count: 0
+      };
+
+      if (cid) {
+        // Update existing customer in local array
+        const existing = updatedCusts.find(c => c.id === cid);
+        if (existing) {
+          payloadToUpdate.balance_due = existing.balance_due || 0;
+          payloadToUpdate.total_spent = existing.total_spent || 0;
+          payloadToUpdate.last_order_date = existing.last_order_date;
+          payloadToUpdate.order_count = existing.order_count || 0;
+          payloadToUpdate.created_at = existing.created_at;
+        }
+        updatedCusts = updatedCusts.map(c => c.id === cid ? payloadToUpdate : c);
+      } else {
+        // Insert new customer if mobile doesn't match an existing one
+        const duplicate = updatedCusts.find(c => c.mobile === normalizedMobileNum);
+        if (duplicate) {
+          cid = duplicate.id;
+          payloadToUpdate.balance_due = duplicate.balance_due || 0;
+          payloadToUpdate.total_spent = duplicate.total_spent || 0;
+          payloadToUpdate.last_order_date = duplicate.last_order_date;
+          payloadToUpdate.order_count = duplicate.order_count || 0;
+          payloadToUpdate.created_at = duplicate.created_at;
+          updatedCusts = updatedCusts.map(c => c.id === cid ? payloadToUpdate : c);
+        } else {
+          updatedCusts.push(payloadToUpdate);
+          cid = payloadToUpdate.id;
+        }
+      }
+
+      // Sync with Supabase backend (unconditional attempt)
+      try {
+        const { error } = await supabase.from('offline_customers').upsert(payloadToUpdate);
+        if (error) {
+          console.error("Supabase Customer Sync failed:", error);
+          setGlobalBanner({ 
+            type: 'error', 
+            text: `Supabase Customer Sync Failed: ${error.message}` 
+          });
+        }
+      } catch (dbErr: any) {
+        console.warn("Could not sync customer changes with backend database:", dbErr);
+      }
+
+      setCustomers(updatedCusts);
+      setSelectedCustomerId(cid);
+      setCustomerMobile(normalizedMobileNum);
+      setOriginalCustDetails({ mobile: normalizedMobileNum, address: customerAddress.trim() });
+      setAskSaveAddress(false);
+      setAskSaveMobile(false);
+      syncStateToLocal(updatedCusts, orders);
+      setGlobalBanner({ type: 'success', text: `Customer details for "${customerName}" successfully saved to CRM!` });
+    } catch (err: any) {
+      setGlobalBanner({ type: 'error', text: `Failed to save customer details: ${err.message}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Cart Management
   const searchMatchingProducts = useMemo(() => {
     if (!prodSearchVal) return [];
@@ -406,17 +553,19 @@ export default function OfflineApp() {
   // Submit Sale Handler
   const handleCheckout = async () => {
     if (cartItems.length === 0) {
-      alert("Please add at least one product to the Cart!");
+      setGlobalBanner({ type: 'warning', text: "Please add at least one product to the Cart!" });
       return;
     }
     if (!customerName.trim()) {
-      alert("Customer Name is required!");
+      setGlobalBanner({ type: 'warning', text: "Customer Name is required to place an order!" });
       return;
     }
     if (!customerMobile.trim()) {
-      alert("Customer Mobile number is required!");
+      setGlobalBanner({ type: 'warning', text: "Customer Mobile number is required!" });
       return;
     }
+
+    const normalizedMobileNum = normalizeMobile(customerMobile);
 
     setLoading(true);
 
@@ -437,7 +586,7 @@ export default function OfflineApp() {
         id: 'cust-' + Math.random().toString(36).substr(2, 9),
         created_at: new Date().toISOString(),
         name: customerName,
-        mobile: customerMobile,
+        mobile: normalizedMobileNum,
         is_store: isWholesale,
         balance_due: balanceDue,
         total_spent: paidAmt,
@@ -447,14 +596,18 @@ export default function OfflineApp() {
         notes: ''
       };
 
-      // Attempt DB Insert
-      if (dbStatus === 'connected') {
-        try {
-          const { error } = await supabase.from('offline_customers').insert(newCust);
-          if (error) throw error;
-        } catch (e: any) {
-          console.warn("DB Customer save failed, keeping offline mode:", e);
+      // Attempt DB Insert (unconditional attempt)
+      try {
+        const { error } = await supabase.from('offline_customers').insert(newCust);
+        if (error) {
+          console.error("Supabase Customer Sync failed:", error);
+          setGlobalBanner({ 
+            type: 'error', 
+            text: `Supabase Customer Sync Failed: ${error.message}` 
+          });
         }
+      } catch (e: any) {
+        console.warn("DB Customer save failed:", e);
       }
 
       updatedCusts.push(newCust);
@@ -474,20 +627,24 @@ export default function OfflineApp() {
           payloadToUpdate.address = customerAddress;
         }
         if (askSaveMobile) {
-          payloadToUpdate.mobile = customerMobile;
+          payloadToUpdate.mobile = normalizedMobileNum;
         }
 
         // Apply to local state
         updatedCusts = updatedCusts.map(c => c.id === customerId ? { ...c, ...payloadToUpdate } : c);
 
-        // Save to Supabase
-        if (dbStatus === 'connected') {
-          try {
-            const { error } = await supabase.from('offline_customers').update(payloadToUpdate).eq('id', customerId);
-            if (error) throw error;
-          } catch (e: any) {
-            console.warn("DB Customer update failed:", e);
+        // Save to Supabase (unconditional attempt)
+        try {
+          const { error } = await supabase.from('offline_customers').update(payloadToUpdate).eq('id', customerId);
+          if (error) {
+            console.error("Supabase Customer Update failed:", error);
+            setGlobalBanner({ 
+              type: 'error', 
+              text: `Supabase Customer Update Failed: ${error.message}` 
+            });
           }
+        } catch (e: any) {
+          console.warn("DB Customer update failed:", e);
         }
       }
     }
@@ -500,7 +657,7 @@ export default function OfflineApp() {
       created_at: new Date().toISOString(),
       customer_id: customerId,
       customer_name: customerName,
-      customer_mobile: customerMobile,
+      customer_mobile: normalizedMobileNum,
       customer_address: customerAddress,
       items: [...cartItems],
       subtotal,
@@ -517,15 +674,24 @@ export default function OfflineApp() {
       staff_name: currentStaff
     };
 
+    setCustomerMobile(normalizedMobileNum);
+
     const updatedOrders = [newOrder, ...orders];
 
-    if (dbStatus === 'connected') {
-      try {
-        const { error } = await supabase.from('offline_orders').insert(newOrder);
-        if (error) throw error;
-      } catch (e: any) {
-        console.warn("DB order insert error, using offline store:", e);
+    // Sync order record directly with Supabase (unconditional attempt)
+    try {
+      const { error } = await supabase.from('offline_orders').insert(newOrder);
+      if (error) {
+        console.error("Supabase Order save failed:", error);
+        setGlobalBanner({ 
+          type: 'error', 
+          text: `Supabase Order Sync Failure: ${error.message}. Please check if the 'offline_orders' table is created in Supabase.` 
+        });
+      } else {
+        setGlobalBanner({ type: 'success', text: `Success! Order registered by ${currentStaff} and synced to Supabase backend.` });
       }
+    } catch (e: any) {
+      console.warn("DB order insert error:", e);
     }
 
     // Sync state
@@ -556,6 +722,11 @@ export default function OfflineApp() {
       type: 'success',
       text: `Successfully registered Order #${newOrder.id.split('-')[1].toUpperCase()} by ${currentStaff}!`
     });
+
+    if (whatsappConfig.triggerOnNewOrder) {
+      triggerWhatsApp(newOrder, false);
+    }
+
     setLoading(false);
     setActiveTab('order_queue');
   };
@@ -586,17 +757,19 @@ export default function OfflineApp() {
     setOrders(updatedOrders);
     syncStateToLocal(customers, updatedOrders);
 
-    // Sync database with Supabase
-    if (dbStatus === 'connected') {
-      try {
-        await supabase.from('offline_orders').update({
-          payment_status: status,
-          amount_paid: nextPaid,
-          balance_due: balanceDue
-        }).eq('id', orderId);
-      } catch (e) {
-        console.warn("Failed database order update:", e);
+    // Sync database with Supabase (unconditional attempt)
+    try {
+      const { error } = await supabase.from('offline_orders').update({
+        payment_status: status,
+        amount_paid: nextPaid,
+        balance_due: balanceDue
+      }).eq('id', orderId);
+      if (error) {
+        console.error("Supabase Order status update failed:", error);
+        setGlobalBanner({ type: 'error', text: `Supabase Sync Fail: ${error.message}` });
       }
+    } catch (e) {
+      console.warn("Failed database order update:", e);
     }
   };
 
@@ -611,26 +784,143 @@ export default function OfflineApp() {
     setOrders(updatedOrders);
     syncStateToLocal(customers, updatedOrders);
 
-    if (dbStatus === 'connected') {
-      try {
-        await supabase.from('offline_orders').update({ dispatch_status: status }).eq('id', orderId);
-      } catch (e) {
-        console.warn("Failed database dispatch status update:", e);
+    // Automatic companion message draft trigger when status transitions to Shipped
+    const matchingOrder = orders.find(o => o.id === orderId);
+    if (matchingOrder && status === 'Shipped') {
+      const mobileSanitized = matchingOrder.customer_mobile.replace(/[^\d]/g, '');
+      const itemsFormatted = matchingOrder.items.map(item => `${item.quantity}x ${item.name}`).join(', ');
+      
+      const shipMessage = `Hello ${matchingOrder.customer_name}! 🌸\n\nFantastic news! Your Havikar order #${matchingOrder.id.split('-')[1].toUpperCase()} has been packed and shipped! 🚀📦\n\n📦 *Fulfillment:* Shipped\n🛍️ *Items Dispatched:* ${itemsFormatted}\n\nWe hope these traditional delights bring absolute joy to your home! You can find more of our healthy, premium, and natural range at www.havikar.com.\n\nThank you so much for choosing us! Let us know if you need any adjustments. Have a warm, beautiful day! ✨`;
+      
+      if (whatsappConfig.mode === 'browser') {
+        const encodedText = encodeURIComponent(shipMessage);
+        const whatsappUrl = `https://api.whatsapp.com/send?phone=${mobileSanitized.startsWith('91') ? mobileSanitized : '91' + mobileSanitized}&text=${encodedText}`;
+        window.open(whatsappUrl, '_blank');
+        setGlobalBanner({ type: 'success', text: 'Opened WhatsApp shipment dispatch confirmation!' });
       }
+    }
+
+    // Sync status change directly to Supabase backend (unconditional attempt)
+    try {
+      const { error } = await supabase.from('offline_orders').update({ dispatch_status: status }).eq('id', orderId);
+      if (error) {
+        console.error("Supabase Dispatch update failed:", error);
+        setGlobalBanner({ type: 'error', text: `Supabase Sync Fail: ${error.message}` });
+      }
+    } catch (e) {
+      console.warn("Failed database dispatch status update:", e);
     }
   };
 
   // WhatsApp formatted message generator & trigger
-  const triggerWhatsApp = (order: OfflineOrder) => {
+  const triggerWhatsApp = async (order: OfflineOrder, manualTrigger = true) => {
     const mobileSanitized = order.customer_mobile.replace(/[^\d]/g, '');
-    let orderSummary = order.items.map(item => `${item.quantity}x ${item.name} (${item.net_weight})`).join(', ');
     
-    const messageText = `Hello ${order.customer_name}, peace from Havikar! 🌸\n\nYour order #${order.id.split('-')[1].toUpperCase()} details:\nItems: ${orderSummary}\nTotal price: ₹${order.total}\nPayment Status: ${order.payment_status} (${order.payment_method})\nFulfillment: ${order.dispatch_status}\n\nThank you for shopping with us! Let us know if you need any adjustments.`;
+    // Format items with names and clickable links based on name slugs
+    const itemsFormatted = order.items.map(item => {
+      const slug = item.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-');
+      return `✨ *${item.quantity}x ${item.name} (${item.net_weight})*\n   🔗 www.havikar.com/products/${slug}`;
+    }).join('\n\n');
+
+    // Build plain-text items summary with URLs for the template parameter {{3}}
+    const itemsSummarySimple = order.items.map(item => {
+      const slug = item.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-');
+      return `${item.quantity}x ${item.name} (www.havikar.com/products/${slug})`;
+    }).join(', ');
     
-    const encodedText = encodeURIComponent(messageText);
-    const whatsappUrl = `https://api.whatsapp.com/send?phone=${mobileSanitized.startsWith('91') ? mobileSanitized : '91' + mobileSanitized}&text=${encodedText}`;
-    
-    window.open(whatsappUrl, '_blank');
+    // Check if it's delivery-based to output "Order Placed" vs "Taken in Store"
+    const displayFulfillment = order.dispatch_status === 'Taken in Store' ? 'Taken in Store' : 'Order Placed';
+
+    // Format dynamics based on payment status
+    const displayPaymentStatus = order.payment_status === 'Paid Full' || order.balance_due <= 0
+      ? "Paid securely! 💳 Thank you"
+      : `Payment due: ₹${order.balance_due}`;
+
+    const messageText = `Hello ${order.customer_name},\n\nThank you for shopping with Havikar! 🌸 Your order has been successfully placed.\n\n• Order Reference: #${order.id.split('-')[1].toUpperCase()}\n• Total Bill Amount: ₹${order.total}\n• Payment Status: ${displayPaymentStatus}\n\nWe appreciate your association. Have a delicious and wholesome day!`;
+
+    if (whatsappConfig.mode === 'browser') {
+      const encodedText = encodeURIComponent(messageText);
+      const whatsappUrl = `https://api.whatsapp.com/send?phone=${mobileSanitized.startsWith('91') ? mobileSanitized : '91' + mobileSanitized}&text=${encodedText}`;
+      window.open(whatsappUrl, '_blank');
+      if (manualTrigger) {
+        setGlobalBanner({ type: 'success', text: 'Opened manual WhatsApp companion chat for bill delivery.' });
+      }
+    } else {
+      // WhatsApp Cloud API Trigger
+      const phoneId = whatsappConfig.phoneNumberId.trim();
+      const token = whatsappConfig.accessToken.trim();
+      if (!phoneId || !token) {
+        if (manualTrigger) {
+          setGlobalBanner({ type: 'error', text: 'WhatsApp Cloud API triggered but Phone Number ID or Access Token is empty! Please check setup.' });
+          setShowWhatsappSettings(true);
+        }
+        return;
+      }
+
+      // Format standard or template call
+      const isHelloWorld = whatsappConfig.templateName.trim() === 'hello_world';
+      let payload: any = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: mobileSanitized.startsWith('91') || mobileSanitized.length > 10 ? mobileSanitized : '91' + mobileSanitized,
+        type: "template",
+        template: {
+          name: whatsappConfig.templateName.trim(),
+          language: {
+            code: whatsappConfig.languageCode.trim() || "en"
+          }
+        }
+      };
+
+      // Add template components mapping the 4 ordered Meta template variables
+      if (!isHelloWorld) {
+        payload.template.components = [
+          {
+            type: "body",
+            parameters: [
+              { type: "text", text: order.customer_name }, // {{1}} - Customer Name
+              { type: "text", text: order.id.split('-')[1].toUpperCase() }, // {{2}} - Order Number
+              { type: "text", text: `₹${order.total}` }, // {{3}} - Total Bill Amount
+              { type: "text", text: displayPaymentStatus } // {{4}} - Payment Status
+            ]
+          }
+        ];
+      }
+
+      try {
+        setLoading(true);
+        // Call our Backend CORS API proxy instead of client browser fetch
+        const res = await fetch(`/api/offline/send-whatsapp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            phoneId,
+            token,
+            payload
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          setGlobalBanner({ type: 'success', text: `WhatsApp Cloud API sent message to ${order.customer_name} successfully!` });
+        } else {
+          console.error("Meta WhatsApp Proxy Error:", data);
+          setGlobalBanner({ 
+            type: 'error', 
+            text: `WhatsApp API Error: ${data?.error?.message || 'Unknown network error. Check console.'}` 
+          });
+          if (manualTrigger) {
+            setShowWhatsappSettings(true);
+          }
+        }
+      } catch (err: any) {
+        setGlobalBanner({ type: 'error', text: `Failed to invoke Meta WhatsApp URL: ${err.message}` });
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
   // Filtered Orders for the Queue
@@ -673,33 +963,40 @@ export default function OfflineApp() {
   const handleSaveCustomerEdits = async () => {
     if (!editedCustData.id) return;
     
+    const updatedMobile = editedCustData.mobile ? normalizeMobile(editedCustData.mobile) : '';
+    const finalEditedCust = { ...editedCustData, ...(updatedMobile ? { mobile: updatedMobile } : {}) };
+
     const updatedCusts = customers.map(c => 
-      c.id === editedCustData.id ? { ...c, ...editedCustData } : c
+      c.id === finalEditedCust.id ? { ...c, ...finalEditedCust } : c
     );
 
     setCustomers(updatedCusts);
     syncStateToLocal(updatedCusts, orders);
     
-    if (dbStatus === 'connected') {
-      try {
-        const { error } = await supabase
-          .from('offline_customers')
-          .update({
-            name: editedCustData.name,
-            mobile: editedCustData.mobile,
-            address: editedCustData.address,
-            is_store: editedCustData.is_store,
-            notes: editedCustData.notes,
-          })
-          .eq('id', editedCustData.id);
-        if (error) throw error;
-      } catch (err: any) {
-        alert("Failed to sync customer changes with backend database: " + err.message);
+    // Sync customer updates unconditionally with Supabase
+    try {
+      const { error } = await supabase
+        .from('offline_customers')
+        .update({
+          name: finalEditedCust.name,
+          mobile: finalEditedCust.mobile,
+          address: finalEditedCust.address,
+          is_store: finalEditedCust.is_store,
+          notes: finalEditedCust.notes,
+        })
+        .eq('id', finalEditedCust.id);
+      if (error) {
+        console.error("Supabase Customer Edit Sync failed:", error);
+        setGlobalBanner({ type: 'error', text: `Supabase CRM Sync Failed: ${error.message}` });
+      } else {
+        setGlobalBanner({ type: 'success', text: `Customer profile updated & synced to Supabase!` });
       }
+    } catch (err: any) {
+      alert("Failed to sync customer changes with backend database: " + err.message);
     }
 
     setIsEditingCustomer(false);
-    setGlobalBanner({ type: 'success', text: `Successfully updated customer profile for ${editedCustData.name}!` });
+    setGlobalBanner({ type: 'success', text: `Successfully updated customer profile for ${finalEditedCust.name}!` });
   };
 
   // Stock management edits
@@ -729,24 +1026,21 @@ export default function OfflineApp() {
     setProducts(updatedProds);
     setEditingStockId(null);
 
-    // Sync back directly to Supabase product_variants
-    if (dbStatus === 'connected') {
-      try {
-        const { error } = await supabase
-          .from('product_variants')
-          .update({ stock_quantity: nextStock })
-          .eq('id', pvId);
-          
-        if (error) {
-          throw error;
-        } else {
-          setGlobalBanner({ type: 'success', text: `Live DB stock updated successfully!` });
-        }
-      } catch (e: any) {
-        alert("Failed to sync on Supabase: " + e.message);
+    // Sync back directly to Supabase product_variants (unconditional attempt)
+    try {
+      const { error } = await supabase
+        .from('product_variants')
+        .update({ stock_quantity: nextStock })
+        .eq('id', pvId);
+        
+      if (error) {
+        console.error("Supabase Stock sync failed:", error);
+        setGlobalBanner({ type: 'error', text: `Supabase Stock Update Failed: ${error.message}` });
+      } else {
+        setGlobalBanner({ type: 'success', text: `Stock successfully updated in Supabase & Local Cache!` });
       }
-    } else {
-      setGlobalBanner({ type: 'info', text: "Stock updated in local cache! Set up live database SQL to sync permanently." });
+    } catch (e: any) {
+      alert("Failed to sync stock on Supabase: " + e.message);
     }
   };
 
@@ -773,8 +1067,15 @@ export default function OfflineApp() {
           .single();
         if (profile && (profile.is_admin === true || profile.role === 'admin')) {
           setIsAdminLoggedIn(true);
+          // Auto bind the active staff to the logged-in administrator's name
+          let adminName = profile.full_name || profile.name || profile.username || data.user.email?.split('@')[0] || 'Poornima';
+          if (adminName && adminName !== 'Poornima') {
+            adminName = adminName.charAt(0).toUpperCase() + adminName.slice(1);
+          }
+          setCurrentStaff(adminName);
+
           fetchInitialData();
-          setGlobalBanner({ type: 'success', text: "Access Granted. Welcome to Havikar Admin POS Console!" });
+          setGlobalBanner({ type: 'success', text: `Access Granted. Logged in as ${adminName}!` });
         } else {
           setAuthError("Access Denied: Only administrative staff are authorized to access the Havikar Offline POS and CRM Register.");
           await supabase.auth.signOut();
@@ -907,20 +1208,17 @@ export default function OfflineApp() {
       setShowAddProductModal(false);
 
     } catch (err: any) {
-      alert("Error onboarding product: " + err.message);
+      setGlobalBanner({ type: 'error', text: "Error onboarding product: " + err.message });
     } finally {
       setLoading(false);
     }
   };
 
   const handleClearAllOrders = async () => {
-    if (!window.confirm("Are you sure you want to clear all offline orders from this console and your local registry? This action cannot be undone.")) {
-      return;
-    }
     try {
       setLoading(true);
       // Clear Supabase offline_orders
-      const { error } = await supabase.from('offline_orders').delete().neq('id', 'placeholder-non-existent-id');
+      const { error } = await supabase.from('offline_orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       if (error) {
         console.warn("Could not wipe server-side offline_orders:", error);
       }
@@ -990,29 +1288,27 @@ export default function OfflineApp() {
     setCustomers(updatedCustomers);
     syncStateToLocal(updatedCustomers, updatedOrders);
 
-    if (dbStatus === 'connected') {
-      try {
-        await supabase.from('offline_orders').update({
-          payment_status: nextStatus,
-          amount_paid: finalPaid,
-          balance_due: balanceDue
-        }).eq('id', orderId);
+    // Sync status & customer totals unconditionally to Supabase backend
+    try {
+      await supabase.from('offline_orders').update({
+        payment_status: nextStatus,
+        amount_paid: finalPaid,
+        balance_due: balanceDue
+      }).eq('id', orderId);
 
-        if (order.customer_id) {
-          const customerToUpdate = updatedCustomers.find(c => c.id === order.customer_id);
-          if (customerToUpdate) {
-            await supabase.from('offline_customers').update({
-              balance_due: customerToUpdate.balance_due,
-              total_spent: customerToUpdate.total_spent
-            }).eq('id', order.customer_id);
-          }
+      if (order.customer_id) {
+        const customerToUpdate = updatedCustomers.find(c => c.id === order.customer_id);
+        if (customerToUpdate) {
+          await supabase.from('offline_customers').update({
+            balance_due: customerToUpdate.balance_due,
+            total_spent: customerToUpdate.total_spent
+          }).eq('id', order.customer_id);
         }
-        setGlobalBanner({ type: 'success', text: `Payment status updated for Order #${orderId.split('-').pop()?.toUpperCase()}!` });
-      } catch (e: any) {
-        console.warn("Database sync error during payment update:", e);
       }
-    } else {
-      setGlobalBanner({ type: 'info', text: "Payment updated in offline-safe state cache." });
+      setGlobalBanner({ type: 'success', text: `Payment status updated for Order #${orderId.split('-').pop()?.toUpperCase()} & synced to Supabase!` });
+    } catch (e: any) {
+      console.warn("Database sync error during payment update:", e);
+      setGlobalBanner({ type: 'error', text: `Failed to sync payment update to Supabase: ${e.message}` });
     }
     setSelectedOrderIdForPayment(null);
   };
@@ -1020,7 +1316,28 @@ export default function OfflineApp() {
   // SQL Script generator for the user
   const SQL_UPDATE_COMMANDS = `-- EXECUTE THIS IN YOUR SUPABASE SQL EDITOR TO SETUP OFFLINE POS SCHEMAS AND ADMIN ROLES:
 
--- 1. Create Offline Customers Table
+-- ==========================================
+-- 1. UPGRADE EXISTING TABLES (MIGRATIONS)
+-- Run these first to fix missing column errors!
+-- ==========================================
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS is_store BOOLEAN DEFAULT false;
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS order_count INTEGER DEFAULT 0;
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS balance_due REAL DEFAULT 0.0;
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS total_spent REAL DEFAULT 0.0;
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE IF EXISTS offline_customers ADD COLUMN IF NOT EXISTS last_order_date TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE IF EXISTS offline_orders ADD COLUMN IF NOT EXISTS additional REAL DEFAULT 0.0;
+ALTER TABLE IF EXISTS offline_orders ADD COLUMN IF NOT EXISTS amount_paid REAL DEFAULT 0.0;
+ALTER TABLE IF EXISTS offline_orders ADD COLUMN IF NOT EXISTS balance_due REAL DEFAULT 0.0;
+ALTER TABLE IF EXISTS offline_orders ADD COLUMN IF NOT EXISTS staff_name TEXT DEFAULT 'Poornima';
+
+-- ==========================================
+-- 2. CREATE SCHEMAS FROM SCRATCH IF MISSING
+-- ==========================================
+
+-- Create Offline Customers Table
 CREATE TABLE IF NOT EXISTS offline_customers (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -1030,12 +1347,12 @@ CREATE TABLE IF NOT EXISTS offline_customers (
     balance_due REAL DEFAULT 0.0,
     total_spent REAL DEFAULT 0.0,
     last_order_date TIMESTAMP WITH TIME ZONE,
-    order_count INT DEFAULT 0,
+    order_count INTEGER DEFAULT 0,
     notes TEXT,
     address TEXT
 );
 
--- 2. Create Offline Orders Table
+-- Create Offline Orders Table
 CREATE TABLE IF NOT EXISTS offline_orders (
     id TEXT PRIMARY KEY,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -1178,18 +1495,10 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
 
         {/* Database Status Tracker */}
         <div className="flex items-center gap-4 mt-3 md:mt-0 flex-wrap">
-          {/* Staff selection */}
-          <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-full border border-white/10">
-            <span className="text-[9px] font-black uppercase text-hav-cream/60">Active Staff:</span>
-            <select 
-              value={currentStaff} 
-              onChange={e => setCurrentStaff(e.target.value)}
-              className="bg-transparent text-sm font-bold text-hav-gold border-none outline-none focus:ring-0 cursor-pointer"
-            >
-              {DEFAULT_STAFF.map(st => (
-                <option key={st} value={st} className="bg-hav-forest text-hav-gold font-bold">{st}</option>
-              ))}
-            </select>
+          {/* Staff selection (Static showing active admin name, no dropdown) */}
+          <div className="flex items-center gap-2 bg-white/10 px-4 py-1.5 rounded-full border border-white/10">
+            <span className="text-[10px] font-black uppercase text-white/50 tracking-wider">Active Staff:</span>
+            <span className="text-sm font-serif font-black text-hav-gold leading-none">{currentStaff}</span>
           </div>
 
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold transition-all ${
@@ -1208,6 +1517,8 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
               </button>
             )}
           </div>
+
+          {/* Database Offline indicators */}
 
           <button 
             onClick={fetchInitialData} 
@@ -1472,6 +1783,38 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                     >
                       <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-300 ${isWholesale ? 'translate-x-5' : ''}`} />
                     </button>
+                  </div>
+
+                  {/* Save Customer Details button */}
+                  <div className="pt-3 border-t border-hav-cream flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomerDetails}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 bg-hav-gold hover:bg-hav-forest text-hav-forest hover:text-hav-gold font-black text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-sm border border-hav-gold/25"
+                    >
+                      <Save className="w-4 h-4" />
+                      Save Customer Details
+                    </button>
+                    {(customerName || customerMobile || customerAddress || selectedCustomerId) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomerName('');
+                          setCustomerMobile('');
+                          setCustomerAddress('');
+                          setSelectedCustomerId('');
+                          setIsWholesale(false);
+                          setOriginalCustDetails(null);
+                          setAskSaveAddress(false);
+                          setAskSaveMobile(false);
+                          setGlobalBanner({ type: 'success', text: "Customer fields cleared." });
+                        }}
+                        className="py-2.5 px-3 bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs rounded-xl transition-colors cursor-pointer border border-red-200"
+                        title="Clear customer fields"
+                      >
+                        Clear
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2049,6 +2392,19 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                               </button>
                             </>
                           )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const supportNum = (whatsappConfig.supportNumber || '91829692577').replace(/[^\d]/g, '');
+                              const ref = order.id.split('-').pop()?.toUpperCase();
+                              const text = encodeURIComponent(`Hello! I need support with Order #${ref} for customer ${order.customer_name}. Please assist.`);
+                              window.open(`https://api.whatsapp.com/send?phone=${supportNum}&text=${text}`, '_blank');
+                            }}
+                            className="col-span-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-500/20 text-[9px] font-black py-2 px-1.5 rounded-xl uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs mt-1"
+                          >
+                            <Send className="w-3.5 h-3.5 text-emerald-600" />
+                            💬 Contact Support WhatsApp (829692577)
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2741,6 +3097,295 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                 className="flex-1 py-2.5 bg-hav-forest hover:bg-hav-gold text-hav-gold hover:text-hav-forest border border-hav-gold/25 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md cursor-pointer"
               >
                 Save Payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Configuration and Automation Hub modal */}
+      {showWhatsappSettings && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-2xl w-full max-w-2xl h-[85vh] flex flex-col border border-hav-gold/20 animate-scaleUp">
+            <div className="flex justify-between items-center mb-6 flex-shrink-0">
+              <div>
+                <h3 className="text-xl md:text-2xl font-serif font-black text-hav-forest flex items-center gap-2">
+                  <span>💬 WhatsApp Integration & CRM Settings</span>
+                </h3>
+                <p className="text-[10px] uppercase font-black text-hav-gold mt-1 tracking-widest">Configure direct web redirects or Meta WhatsApp Cloud API triggers</p>
+              </div>
+              <button 
+                onClick={() => setShowWhatsappSettings(false)} 
+                className="p-1.5 hover:bg-hav-cream rounded-full transition-colors text-hav-olive"
+              >
+                <X className="w-5.5 h-5.5" />
+              </button>
+            </div>
+
+            <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar flex-grow">
+              {/* Selector */}
+              <div className="bg-hav-cream/30 p-4 rounded-2xl border border-hav-gold/10">
+                <label className="text-[10px] font-black uppercase text-hav-forest block mb-2 tracking-wider">Select Dispatch Mode</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setWhatsappConfig(prev => ({ ...prev, mode: 'browser' }))}
+                    className={`py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider border transition-all ${
+                      whatsappConfig.mode === 'browser' 
+                        ? 'bg-hav-forest text-hav-gold border-hav-forest shadow-md' 
+                        : 'bg-white hover:bg-gray-50 text-hav-olive border-gray-200'
+                    }`}
+                  >
+                    Direct Web Link (Manual)
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setWhatsappConfig(prev => ({ ...prev, mode: 'cloud_api' }))}
+                    className={`py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider border transition-all ${
+                      whatsappConfig.mode === 'cloud_api' 
+                        ? 'bg-hav-forest text-hav-gold border-hav-forest shadow-md' 
+                        : 'bg-white hover:bg-gray-50 text-hav-olive border-gray-200'
+                    }`}
+                  >
+                    WhatsApp Cloud API (Automated)
+                  </button>
+                </div>
+                <p className="text-[10px] text-hav-olive mt-2 opacity-85 leading-relaxed">
+                  {whatsappConfig.mode === 'browser' 
+                    ? "✓ Standard mode. Pre-compiles full bill details, invoice price and item list and opens standard WhatsApp Web page with the pre-filled message, allowing manual click-to-send without any tokens or setup."
+                    : "⚡ Highly advanced serverless automation. Fires directly from POS browser to Facebook Graph API. Perfect for test flow alerts or automated customer outreach."
+                  }
+                </p>
+              </div>
+
+              {/* Automation Toggle */}
+              <div className="bg-white p-4 rounded-2xl border border-hav-gold/10 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-black text-hav-forest uppercase tracking-wider">Autosend Bill on Checkout</h4>
+                  <p className="text-[10px] text-hav-olive opacity-80 mt-0.5">Automatically trigger message on completing order checkout register</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWhatsappConfig(prev => ({ ...prev, triggerOnNewOrder: !prev.triggerOnNewOrder }))}
+                  className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${whatsappConfig.triggerOnNewOrder ? 'bg-hav-gold' : 'bg-gray-300'}`}
+                >
+                  <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-300 ${whatsappConfig.triggerOnNewOrder ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {whatsappConfig.mode === 'cloud_api' && (
+                <div className="space-y-4 animate-fadeIn">
+                  {/* METABOX: Ultimate Meta WhatsApp API Troubleshooting Helper */}
+                  <div className="bg-sky-50 text-sky-950 border border-sky-200 rounded-2xl p-4 text-[11px] leading-relaxed w-full">
+                    <div className="flex justify-between items-start mb-2">
+                      <strong className="font-extrabold uppercase tracking-wide block text-sky-900">🛠️ Meta Studio Developer Credentials:</strong>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWhatsappConfig({
+                            mode: 'cloud_api',
+                            phoneNumberId: '1066359256570178',
+                            accessToken: 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD',
+                            templateName: 'hav_order',
+                            languageCode: 'en',
+                            recipientNumbers: whatsappConfig.recipientNumbers,
+                            triggerOnNewOrder: true,
+                            supportNumber: '91829692577'
+                          });
+                          setGlobalBanner({ type: 'success', text: 'Official Havikar WhatsApp API keys successfully loaded!' });
+                        }}
+                        className="px-2 py-1 bg-sky-900 text-sky-100 text-[9px] font-black uppercase tracking-wider rounded border border-sky-700 hover:bg-sky-950 hover:text-white transition-colors"
+                      >
+                        🔄 Restore Official Credentials
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-3 font-medium text-sky-850">
+                      <div>
+                        <span className="font-black text-rose-700 uppercase">1. Sending to any/all customer numbers:</span>
+                        <p className="mt-0.5">While your Meta App remains in <strong>Sandbox Mode (Development)</strong> with a test phone number (+1 555-xxx-xxxx), Meta strictly limits delivery <strong>ONLY to whitelisted Sandbox Testers</strong> (the To number you registered in their panel). To send messages to all customers, you must complete <strong>Step 5 (Add a phone number)</strong> in your Meta panel to link & verify your permanent live phone number, and complete <strong>Step 6</strong> (Set up a payment method) to lift the sandbox restrictions.</p>
+                      </div>
+
+                      <div className="h-px bg-sky-200" />
+
+                      <div>
+                        <span className="font-black text-rose-700 uppercase">2. Fixing Rejection: "Template does not exist" (#132001):</span>
+                        <p className="mt-0.5">Meta requires message templates to be reviewed and pre-approved. Your template name <code>hav_order</code> doesn't exist yet on your Meta Business Account under English (en/en_US). To resolve this:</p>
+                        <ul className="list-disc list-inside mt-1 ml-1 space-y-1 text-[10px]">
+                          <li>Either change the template name below to <strong><code>hello_world</code></strong> (which is pre-approved for all test accounts by Meta with language <strong><code>en_US</code></strong> or <strong><code>en</code></strong>).</li>
+                          <li>Or go to Meta Developer Dashboard &rarr; <strong>WhatsApp Manager</strong> &rarr; <strong>Message Templates</strong>, create a new template named <strong><code>hav_order</code></strong> with language <strong><code>en</code></strong>, define the variables, and wait for Facebook to approve it.</li>
+                        </ul>
+                      </div>
+
+                      <div className="h-px bg-sky-200" />
+
+                      <div>
+                        <span className="font-black text-emerald-700 uppercase">3. Prevent Daily Expiration (Get a Permanent Token):</span>
+                        <p className="mt-0.5">To prevent your access token from expiring every 24 hours, you need to generate a <strong>Permanent System User Access Token</strong> through Meta Business Manager:</p>
+                        <ol className="list-decimal list-inside mt-1 ml-1 space-y-1 text-[10px]">
+                          <li>Go to your <strong>Meta Business Suite Settings</strong> (business.facebook.com/settings).</li>
+                          <li>Go to <strong>Users &rarr; System Users</strong>. Add a new System User (choose role <em>"Admin"</em>).</li>
+                          <li>Click on your System User, click <strong>Add Assets</strong>, choose <strong>Apps</strong> &rarr; select your WhatsApp app, and enable **Full Control**. Save changes.</li>
+                          <li>Under the same System User, click <strong>Generate New Token</strong>. Select your WhatsApp App.</li>
+                          <li>Check the <strong>whatsapp_business_messaging</strong> and <strong>whatsapp_business_management</strong> scopes.</li>
+                          <li>Click <strong>Generate Token</strong>. Copy this permanent token and paste it below! It will <strong>never expire</strong>.</li>
+                        </ol>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">WhatsApp Phone Number ID</label>
+                      <input 
+                        type="text"
+                        value={whatsappConfig.phoneNumberId}
+                        onChange={e => setWhatsappConfig(prev => ({ ...prev, phoneNumberId: e.target.value }))}
+                        className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 text-xs text-hav-brown font-mono focus:outline-none focus:ring-2 focus:ring-hav-gold/40"
+                        placeholder="e.g. 106341278xxxxxx"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">Language Code (Locale)</label>
+                      <input 
+                        type="text"
+                        value={whatsappConfig.languageCode}
+                        onChange={e => setWhatsappConfig(prev => ({ ...prev, languageCode: e.target.value }))}
+                        className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 text-xs text-hav-brown font-mono focus:outline-none focus:ring-2 focus:ring-hav-gold/40"
+                        placeholder="e.g. en_US"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">WhatsApp Cloud API Permanent Access Token</label>
+                    <input 
+                      type="password"
+                      value={whatsappConfig.accessToken}
+                      onChange={e => setWhatsappConfig(prev => ({ ...prev, accessToken: e.target.value }))}
+                      className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 text-xs font-mono text-hav-brown bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-hav-gold/40"
+                      placeholder="Paste EAAB... Meta App Token"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">Official Message Template Name</label>
+                      <input 
+                        type="text"
+                        value={whatsappConfig.templateName}
+                        onChange={e => setWhatsappConfig(prev => ({ ...prev, templateName: e.target.value }))}
+                        className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 text-xs text-hav-brown font-mono focus:outline-none focus:ring-2 focus:ring-hav-gold/40"
+                        placeholder="e.g. hello_world"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">Sandbox Tester Recipients</label>
+                      <input 
+                        type="text"
+                        value={whatsappConfig.recipientNumbers}
+                        onChange={e => setWhatsappConfig(prev => ({ ...prev, recipientNumbers: e.target.value }))}
+                        className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 text-xs text-hav-brown focus:outline-none focus:ring-2 focus:ring-hav-gold/40 placeholder:text-gray-400"
+                        placeholder="e.g. +91 702xx xxxxx (Comma separated)"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-black uppercase text-hav-gold block mb-1">Dedicated Customer Support WhatsApp Hotline (e.g. for customer support redirects)</label>
+                    <input 
+                      type="text"
+                      value={whatsappConfig.supportNumber}
+                      onChange={e => setWhatsappConfig(prev => ({ ...prev, supportNumber: e.target.value }))}
+                      className="w-full border border-hav-orange-200 rounded-xl py-2 px-3 text-xs text-hav-brown font-mono focus:outline-none focus:ring-2 focus:ring-hav-gold/40"
+                      placeholder="e.g. 91829692577"
+                    />
+                  </div>
+
+                  <div className="h-px bg-hav-cream my-2" />
+
+                  {/* Sandbox Tester Trigger */}
+                  <div className="bg-hav-forest/5 p-4 rounded-2xl border border-hav-gold/15">
+                    <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-wider mb-2">⚡ Sandbox Signal Test-flight</h4>
+                    <p className="text-[9px] text-hav-olive mb-3">Fire a template confirmation payload to your test number to check communication tunnels.</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const tester = whatsappConfig.recipientNumbers.split(',')[0]?.replace(/[^\d]/g, '');
+                          if (!tester || !whatsappConfig.phoneNumberId || !whatsappConfig.accessToken) {
+                            setGlobalBanner({ type: 'warning' as any, text: 'To perform this test, enter Phone Number ID, Access Token, and Sandbox Tester Number!' });
+                            return;
+                          }
+                          try {
+                            setLoading(true);
+
+                            const isHelloWorld = (whatsappConfig.templateName || "hello_world").trim() === 'hello_world';
+                            let payload: any = {
+                              messaging_product: "whatsapp",
+                              recipient_type: "individual",
+                              to: tester.startsWith('91') || tester.length > 10 ? tester : '91' + tester,
+                              type: "template",
+                              template: {
+                                name: (whatsappConfig.templateName || "hello_world").trim(),
+                                language: { code: (whatsappConfig.languageCode || "en").trim() }
+                              }
+                            };
+                            if (!isHelloWorld) {
+                              payload.template.components = [
+                                {
+                                  type: "body",
+                                  parameters: [
+                                    { type: "text", text: "Verified Tester" }, // {{1}} - Customer Name
+                                    { type: "text", text: "SANDBOX123" }, // {{2}} - Order Number
+                                    { type: "text", text: "₹999" }, // {{3}} - Total Bill Amount
+                                    { type: "text", text: "Paid securely! 💳 Thank you" } // {{4}} - Payment Status
+                                  ]
+                                }
+                              ];
+                            }
+
+                            // Call backend API proxy to completely bypass browser CORS block
+                            const res = await fetch(`/api/offline/send-whatsapp`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json'
+                              },
+                              body: JSON.stringify({
+                                phoneId: whatsappConfig.phoneNumberId,
+                                token: whatsappConfig.accessToken,
+                                payload
+                              })
+                            });
+
+                            const data = await res.json();
+                            if (res.ok) {
+                              setGlobalBanner({ type: 'success', text: `Verification successful! Test message dispatched to #${tester}` });
+                            } else {
+                              setGlobalBanner({ type: 'error', text: `Meta rejection: ${data?.error?.message || 'Check credentials'}` });
+                            }
+                          } catch (e: any) {
+                            setGlobalBanner({ type: 'error', text: `Network error: ${e.message}` });
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                        className="px-4 py-2 bg-hav-gold hover:bg-hav-forest text-hav-forest hover:text-hav-gold border border-hav-gold text-[10px] font-black uppercase tracking-wider rounded-xl transition-all shadow-sm cursor-pointer"
+                      >
+                        Launch Test Preview Sandbox Ping
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-hav-gold/10 flex justify-end gap-3 flex-shrink-0">
+              <button 
+                onClick={() => setShowWhatsappSettings(false)}
+                className="px-6 py-2.5 bg-hav-forest text-hav-gold hover:text-hav-forest hover:bg-hav-gold border border-hav-gold/30 rounded-xl font-black text-xs uppercase tracking-widest transition-all cursor-pointer shadow-md"
+              >
+                Close & Apply Settings
               </button>
             </div>
           </div>

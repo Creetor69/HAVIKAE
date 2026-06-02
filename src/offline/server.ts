@@ -1,4 +1,3 @@
-
 import express from "express";
 import path from "path";
 import cors from "cors";
@@ -149,6 +148,37 @@ app.post("/api/admin/fetch-metadata", async (req, res) => {
         res.json(result);
     } catch (err: any) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Proxy route for offline WhatsApp sending to completely bypass client side CORS blocks
+app.post("/api/offline/send-whatsapp", async (req, res) => {
+    try {
+        const { phoneId, token, payload } = req.body;
+        if (!phoneId || !token || !payload) {
+            return res.status(400).json({ error: "phoneId, token, and payload are required arguments." });
+        }
+
+        console.log(`[PROXY] Forwarding WhatsApp API request to ${phoneId}`);
+        const metaRes = await fetch(`https://graph.facebook.com/v20.0/${phoneId}/messages`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await metaRes.json();
+        if (metaRes.ok) {
+            return res.json(data);
+        } else {
+            console.error("[PROXY] Meta rejection:", data);
+            return res.status(metaRes.status).json({ error: data?.error || { message: "Failed during Facebook API response" } });
+        }
+    } catch (err: any) {
+        console.error("[PROXY] Network error in proxy:", err);
+        return res.status(500).json({ error: { message: err.message } });
     }
 });
 
