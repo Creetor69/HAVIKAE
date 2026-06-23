@@ -5,6 +5,7 @@ import StarRating from './StarRating';
 import HeartIcon from './icons/HeartIcon';
 import CompareIcon from './icons/CompareIcon';
 import DiscountDisplay from './DiscountDisplay';
+import { useLiteMode } from '../hooks/useLiteMode';
 
 interface ProductCardProps {
   product: Product;
@@ -29,6 +30,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
     onAddToCart, 
     onBuyNow 
 }) => {
+  const { isLiteMode } = useLiteMode();
   
   const variants = product.product_variants || [];
   const isOutOfStock = variants.length === 0 || variants.every(v => v.stock_quantity <= 0);
@@ -65,13 +67,22 @@ const ProductCard: React.FC<ProductCardProps> = ({
       {/* Visual Header - Extra Compact */}
       <div className="relative p-2 md:p-2 bg-hav-cream/25 overflow-hidden">
         <div className="w-full h-16 md:h-32 flex items-center justify-center">
-            <img 
-                src={product.image_urls?.[0]} 
-                alt={product.name} 
-                className="w-full h-full object-contain mix-blend-multiply transition-transform duration-700 group-hover:scale-110" 
-                loading="lazy" 
-                decoding="async"
-            />
+            {isLiteMode ? (
+              <div className="w-full h-full rounded-2xl bg-gradient-to-br from-hav-forest/5 to-hav-gold/10 border border-hav-gold/15 flex flex-col items-center justify-center select-none p-1 text-center">
+                <span className="text-xs md:text-xl font-black font-serif text-hav-forest tracking-wider line-clamp-1">
+                  {product.name.split(' ').map(word => word[0]).join('').slice(0, 3).toUpperCase()}
+                </span>
+                <span className="text-[6px] md:text-[8px] text-hav-olive/75 font-semibold mt-0.5 tracking-widest uppercase">Lite View Active</span>
+              </div>
+            ) : (
+              <img 
+                  src={product.image_urls?.[0]} 
+                  alt={product.name} 
+                  className="w-full h-full object-contain mix-blend-multiply transition-transform duration-700 group-hover:scale-110" 
+                  loading="lazy" 
+                  decoding="async"
+              />
+            )}
         </div>
         
         {/* Floating Wishlist Icon */}

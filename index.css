@@ -16,6 +16,11 @@ body {
   background-color: var(--hav-cream);
   color: var(--hav-olive);
   font-family: 'Open Sans', sans-serif;
+  overflow-x: hidden;
+}
+
+html {
+  overflow-x: hidden;
 }
 
 .font-mono {

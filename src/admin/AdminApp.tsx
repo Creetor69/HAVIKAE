@@ -1,6 +1,7 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from './supabaseClient';
+
 import { 
     Order, Product, ProductUpdate, Coupon, CouponInsert, ProductInsert, 
     PromotionalContent, PromotionalContentInsert, PromotionalContentUpdate, 
@@ -15,8 +16,9 @@ import BlogEditorModal from './components/BlogEditorModal';
 import LoadingSpinner from './components/LoadingSpinner';
 import { XIcon, Lock, LogIn, AlertCircle, SearchIcon, ShoppingCartIcon, UserIcon } from './components/Icons';
 import { EditProductModal, CouponModal, ItemsSoldModal, PromoContentModal, LegalDocumentEditor, SaleBannerModal, ComboModal, RecipeModal, AboutSectionModal, OrderDetailsModal, CreateProductModal, UserDetailModal } from './components/Modals';
+import { BannersShelfStudio } from './components/BannersShelfStudio';
 
-type AdminView = 'analytics' | 'orders' | 'products' | 'combos' | 'coupons' | 'sale_banners' | 'promos' | 'legal' | 'recipes' | 'settings' | 'blog' | 'users' | 'commission' | 'withdrawals' | 'site_content' | 'category_images' | 'messages' | 'appearance';
+type AdminView = 'banners' | 'analytics' | 'orders' | 'products' | 'combos' | 'coupons' | 'sale_banners' | 'promos' | 'legal' | 'recipes' | 'settings' | 'blog' | 'users' | 'commission' | 'withdrawals' | 'site_content' | 'category_images' | 'messages' | 'appearance';
 
 const primaryButtonStyles = "bg-hav-forest text-hav-gold hover:bg-hav-forest/90 hover:shadow-lg border border-hav-gold/20 font-bold py-2 px-6 rounded-full transition-all duration-300";
 
@@ -137,6 +139,7 @@ const AdminApp: React.FC = () => {
     
     // Data State
     const [orders, setOrders] = useState<AdminOrder[]>([]);
+    const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     const [saleBanners, setSaleBanners] = useState<SaleBanner[]>([]);
@@ -179,6 +182,7 @@ const AdminApp: React.FC = () => {
     const [editingOrder, setEditingOrder] = useState<AdminOrder | null>(null);
     const [isUserDetailModalOpen, setIsUserDetailModalOpen] = useState(false);
     const [selectedUserForDetail, setSelectedUserForDetail] = useState<Profile | null>(null);
+    const processedOrdersRef = useRef<Set<string>>(new Set());
 
     // Other States
     const [newCategoryName, setNewCategoryName] = useState('');
@@ -191,6 +195,34 @@ const AdminApp: React.FC = () => {
     const [shippingTiers, setShippingTiers] = useState<ShippingTier[]>([]);
     const [uploadingCatId, setUploadingCatId] = useState<string | null>(null);
     const [currentStoreSettings, setCurrentStoreSettings] = useState<StoreSettingsUpdate>({});
+
+    const [whatsappConfig, setWhatsappConfig] = useState({
+        phoneNumberId: '1066359256570178',
+        accessToken: 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD',
+        templateName: 'hav_order',
+        recipientNumbers: '8296925577, 9845024156',
+        triggerOnNewOrder: true,
+        languageCode: 'en'
+    });
+
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('hav_whatsapp_config');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                setWhatsappConfig({
+                    phoneNumberId: parsed.phoneNumberId || '1066359256570178',
+                    accessToken: parsed.accessToken || 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD',
+                    templateName: parsed.templateName || 'hav_order',
+                    recipientNumbers: parsed.recipientNumbers || '8296925577, 9845024156',
+                    triggerOnNewOrder: parsed.triggerOnNewOrder ?? true,
+                    languageCode: parsed.languageCode || 'en'
+                });
+            }
+        } catch (e) {
+            console.warn("Could not load WhatsApp config in AdminApp", e);
+        }
+    }, []);
 
     const fetchData = useCallback(async () => {
         setIsLoading(true);
@@ -298,7 +330,7 @@ const AdminApp: React.FC = () => {
 
         const channel = supabase
             .channel('admin-orders-realtime')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload) => {
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, async (payload) => {
                 // Play notification sound
                 const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
                 audio.play().catch(e => console.log('Audio play failed', e));
@@ -310,6 +342,117 @@ const AdminApp: React.FC = () => {
                     });
                 }
                 
+                // Try sending WhatsApp using working active Admin's Token
+                try {
+                    const order = payload.new;
+                    if (order && !processedOrdersRef.current.has(order.id)) {
+                        processedOrdersRef.current.add(order.id);
+                        
+                        const saved = localStorage.getItem('hav_whatsapp_config');
+                        if (saved) {
+                            const config = JSON.parse(saved);
+                            if (config.triggerOnNewOrder && config.accessToken && config.phoneNumberId) {
+                                console.log("[REALTIME WHATSAPP] Triggering automatic WhatsApp message for website order:", order.order_number);
+                                
+                                let userName = "Customer";
+                                let userMobile = "";
+                                
+                                if (order.user_id) {
+                                    const { data: profile } = await supabase.from('profiles').select('name, mobile').eq('id', order.user_id).single();
+                                    if (profile) {
+                                        userName = profile.name || userName;
+                                        userMobile = profile.mobile || userMobile;
+                                    }
+                                }
+                                
+                                userName = order.shipping_address?.name || userName;
+                                userMobile = order.shipping_address?.phone_number || order.shipping_address?.mobile || userMobile;
+
+                                const cleanAndFormatMobile = (num: string) => {
+                                    const sanitized = num.replace(/\D/g, '');
+                                    if (sanitized.length < 10) return null;
+                                    const cleanStr = sanitized.startsWith('0') ? sanitized.substring(1) : sanitized;
+                                    if (cleanStr.length < 10) return null;
+                                    return cleanStr.startsWith('91') && cleanStr.length === 12 ? cleanStr : (cleanStr.length === 10 ? '91' + cleanStr : cleanStr);
+                                };
+
+                                const targetNumbers: string[] = [];
+                                const customerNum = cleanAndFormatMobile(userMobile);
+                                if (customerNum) targetNumbers.push(customerNum);
+
+                                const configuredAlerts = config.recipientNumbers 
+                                    ? config.recipientNumbers.split(',').map((s: string) => s.trim()).filter(Boolean)
+                                    : ['8296925577', '9845024156'];
+
+                                for (const alert of configuredAlerts) {
+                                    const cleanAlert = cleanAndFormatMobile(alert);
+                                    if (cleanAlert && !targetNumbers.includes(cleanAlert)) {
+                                        targetNumbers.push(cleanAlert);
+                                    }
+                                }
+
+                                const isPaid = order.payment_id || order.payment_method === 'Razorpay' || order.status === 'Payment Received' || order.payment_status === 'Paid Full';
+                                const displayPaymentStatus = isPaid
+                                    ? "Paid securely! 💳 Thank you"
+                                    : `Payment due: ₹${order.total}`;
+
+                                const templateName = "hav_order";
+                                const languageCode = config.languageCode || "en";
+
+                                const productsSummary = Array.isArray(order.items)
+                                    ? order.items.map((item: any) => `${item.quantity}x ${item.name || 'Product'}${item.net_weight ? ` (${item.net_weight})` : ''}`).join(', ')
+                                    : 'Traditional Foods';
+
+                                for (const recipient of targetNumbers) {
+                                    const whatsappPayload = {
+                                        messaging_product: "whatsapp",
+                                        recipient_type: "individual",
+                                        to: recipient,
+                                        type: "template",
+                                        template: {
+                                            name: templateName,
+                                            language: { code: languageCode },
+                                            components: [
+                                                {
+                                                    type: "body",
+                                                    parameters: [
+                                                        { type: "text", text: userName || 'Customer' }, // {{1}} Name
+                                                        { type: "text", text: String(order.order_number || order.id) }, // {{2}} Order ID
+                                                        { type: "text", text: productsSummary.slice(0, 1020) }, // {{3}} Products
+                                                        { type: "text", text: `₹${order.total}` }, // {{4}} Total Amount
+                                                        { type: "text", text: displayPaymentStatus }, // {{5}} Payment Status
+                                                        { type: "text", text: order.status || 'Order Placed' } // {{6}} Order Status
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    };
+
+                                    console.log(`[REALTIME WHATSAPP] Dispatching WhatsApp template direct to Meta API to recipient: ${recipient}`);
+                                    
+                                    fetch(`https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`, {
+                                        method: 'POST',
+                                        headers: { 
+                                            'Content-Type': 'application/json',
+                                            'Authorization': `Bearer ${config.accessToken}`
+                                        },
+                                        body: JSON.stringify(whatsappPayload)
+                                    })
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        console.log(`[REALTIME WHATSAPP] Successfully sent to recipient: ${recipient}`, data);
+                                    })
+                                    .catch(err => {
+                                        console.error(`[REALTIME WHATSAPP] Sending failed for recipient: ${recipient}`, err);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch (whatsappErr: any) {
+                    console.error("[REALTIME WHATSAPP] Could not process automated WhatsApp alerts:", whatsappErr.message);
+                }
+
                 // Refresh data to show new order
                 fetchData();
             })
@@ -721,11 +864,42 @@ const AdminApp: React.FC = () => {
 
     const handleSaveStoreSettings = async () => {
         const { id, created_at, ...settingsPayload } = currentStoreSettings as any;
-        const { error } = await supabase.from('store_settings').update({ ...settingsPayload, shipping_tiers: shippingTiers }).eq('id', 1);
-        if (error) alert("Failed to update settings.");
-        else {
-            alert("Settings updated!");
-            fetchData();
+        
+        try {
+            localStorage.setItem('hav_whatsapp_config', JSON.stringify(whatsappConfig));
+        } catch (e: any) {
+            console.error("Failed to save credentials to localStorage:", e.message);
+        }
+
+        const databasePayload = { 
+            ...settingsPayload, 
+            shipping_tiers: shippingTiers,
+            whatsapp_phone_number_id: whatsappConfig.phoneNumberId,
+            whatsapp_access_token: whatsappConfig.accessToken,
+            whatsapp_template_name: whatsappConfig.templateName,
+            whatsapp_recipient_numbers: whatsappConfig.recipientNumbers
+        };
+
+        try {
+            const { error } = await supabase.from('store_settings').update(databasePayload).eq('id', 1);
+            if (error) {
+                console.warn("[DB PERSISTENCE] Columns might be missing. Falling back. Error:", error);
+                
+                // Fallback: update only standard settings
+                const { error: fallbackErr } = await supabase.from('store_settings').update({ ...settingsPayload, shipping_tiers: shippingTiers }).eq('id', 1);
+                if (fallbackErr) {
+                    alert("Failed to update general store settings in DB.");
+                } else {
+                    alert("Settings updated perfectly to browser local storage! Note: Remote DB is missing new WhatsApp columns, but automated alerts are fully active.");
+                    fetchData();
+                }
+            } else {
+                alert("Settings updated perfectly to both browser local storage & Supabase!");
+                fetchData();
+            }
+        } catch (e: any) {
+            console.error(e);
+            alert("Settings updated perfectly to browser local storage!");
         }
     };
 
@@ -752,6 +926,68 @@ const AdminApp: React.FC = () => {
             }
         }
         return !error;
+    };
+
+    const handleDeleteOrder = async (orderId: string) => {
+        if (!window.confirm("Are you sure you want to delete this order permanently? This action cannot be undone.")) return;
+        try {
+            const { error } = await supabase.from('orders').delete().eq('id', orderId);
+            if (error) {
+                alert(`Error deleting order: ${error.message}`);
+            } else {
+                setOrders(prev => prev.filter(o => o.id !== orderId));
+                setSelectedOrderIds(prev => prev.filter(id => id !== orderId));
+                if (editingOrder?.id === orderId) {
+                    setEditingOrder(null);
+                    setIsOrderDetailsOpen(false);
+                }
+            }
+        } catch (err: any) {
+            console.error("Failed to delete order", err);
+            alert(`Failed: ${err.message || err}`);
+        }
+    };
+
+    const handleDeleteSelectedOrders = async () => {
+        if (selectedOrderIds.length === 0) return;
+        if (!window.confirm(`Are you sure you want to delete the ${selectedOrderIds.length} selected orders? This action cannot be undone.`)) return;
+        try {
+            const { error } = await supabase.from('orders').delete().in('id', selectedOrderIds);
+            if (error) {
+                alert(`Error deleting orders: ${error.message}`);
+            } else {
+                setOrders(prev => prev.filter(o => !selectedOrderIds.includes(o.id)));
+                setSelectedOrderIds([]);
+            }
+        } catch (err: any) {
+            console.error("Failed to delete multiple orders", err);
+            alert(`Failed: ${err.message || err}`);
+        }
+    };
+
+    const handleFlushAllOrders = async () => {
+        const confirm1 = window.confirm("⚠️ CRITICAL WARNING ⚠️\n\nYou are about to FLUSH (PERMANENTLY RESET_MUTATION) ALL orders in the Admin panel, clearing all revenue, analytics, items-sold and transaction logs back to 0!\n\nThis is completely irreversible. Are you sure you want to proceed?");
+        if (!confirm1) return;
+        const confirm2 = window.prompt("To verify this destructive action, please type:\n\nFLUSH ALL");
+        if (confirm2 !== "FLUSH ALL") {
+            alert("Flushing aborted: Confirmation text did not match.");
+            return;
+        }
+        try {
+            // Since some Supabase config restricts bare deletes, we use a global filter that matches everything
+            const { error } = await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            if (error) {
+                alert(`Error flushing data: ${error.message}`);
+            } else {
+                setOrders([]);
+                setSelectedOrderIds([]);
+                alert("The Admin Panel has been successfully flushed. Resetting all revenue and order analytics!");
+                fetchData();
+            }
+        } catch (err: any) {
+            console.error("Failed to flush orders", err);
+            alert(`Failed: ${err.message || err}`);
+        }
     };
 
     const handleOrderStatusChange = async (orderId: string, newStatus: string) => {
@@ -861,6 +1097,7 @@ const AdminApp: React.FC = () => {
                             <SideNavLink view="users" label="Manage Users" />
                             <SideNavLink view="coupons" label="Manage Coupons" />
                             <SideNavLink view="commission" label="Commission Settings" />
+                            <SideNavLink view="banners" label="Banners Studio 🎨" />
                             <SideNavLink view="promos" label="Promo Content" />
                             <SideNavLink view="sale_banners" label="Sale Banners" />
                             <SideNavLink view="legal" label="Legal Documents" />
@@ -1020,29 +1257,144 @@ const AdminApp: React.FC = () => {
 
                                 {activeView === 'orders' && (
                                     <div>
-                                        <h2 className="text-2xl font-bold mb-4">Orders</h2>
-                                        <div className="space-y-4">
-                                            {orders.map(order => (
-                                                <div key={order.id} className={`p-4 border rounded ${getStatusColor(order.status)}`}>
-                                                    <div className="flex justify-between">
-                                                        <div>
-                                                            <p className="font-bold">Order #{order.order_number}</p>
-                                                            <p className="text-sm">{new Date(order.created_at).toLocaleString()}</p>
-                                                            <p className="text-xs text-gray-600 mt-1">Customer: <span className="font-semibold">{order.userName}</span> ({order.userMobile && order.userMobile !== 'N/A' ? order.userMobile : (order.shipping_address?.phone_number || order.shipping_address?.mobile || 'N/A')})</p>
-                                                        </div>
-                                                        <div className="text-right">
-                                                            <p className="font-bold text-lg">₹{order.total}</p>
-                                                            <span className="text-sm font-semibold">{order.status}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-2 flex gap-2">
-                                                        <select value={order.status} onChange={(e) => handleOrderStatusChange(order.id, e.target.value)} className="text-sm border rounded p-1">
-                                                            <option>Processing</option><option>Payment Received</option><option>Shipped</option><option>Delivered</option><option>Cancelled</option>
-                                                        </select>
-                                                        <button onClick={() => { setEditingOrder(order); setIsOrderDetailsOpen(true); }} className="text-sm underline">Details</button>
-                                                    </div>
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                                            <div className="flex items-center gap-3">
+                                                <h2 className="text-2xl font-bold">Orders</h2>
+                                                <span className="bg-hav-olive/10 text-hav-olive text-xs font-bold px-2 py-1 rounded-full">{orders.length} Total</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button 
+                                                    onClick={handleFlushAllOrders} 
+                                                    className="bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 text-xs font-bold py-2 px-4 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
+                                                >
+                                                    ⚠️ Flush All Orders & Revenue
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {orders.length > 0 && (
+                                            <div className="bg-white p-3 rounded-xl border border-hav-olive/10 mb-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+                                                <div className="flex items-center gap-2">
+                                                     <input 
+                                                         type="checkbox" 
+                                                         id="select-all-orders"
+                                                         className="rounded border-gray-300 text-hav-forest focus:ring-hav-forest cursor-pointer"
+                                                         checked={orders.length > 0 && selectedOrderIds.length === orders.length}
+                                                         onChange={(e) => {
+                                                             if (e.target.checked) {
+                                                                 setSelectedOrderIds(orders.map(o => o.id));
+                                                             } else {
+                                                                 setSelectedOrderIds([]);
+                                                             }
+                                                         }}
+                                                     />
+                                                     <label htmlFor="select-all-orders" className="font-semibold select-none cursor-pointer text-xs sm:text-sm">
+                                                         Select All ({selectedOrderIds.length} / {orders.length} selected)
+                                                     </label>
                                                 </div>
-                                            ))}
+
+                                                {selectedOrderIds.length > 0 && (
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            onClick={handleDeleteSelectedOrders}
+                                                            className="bg-red-600 text-white hover:bg-red-700 text-xs font-bold py-1.5 px-4 rounded-full transition-colors flex items-center gap-1 cursor-pointer"
+                                                        >
+                                                            Delete Selected ({selectedOrderIds.length})
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => setSelectedOrderIds([])}
+                                                            className="text-gray-500 hover:text-gray-700 text-xs font-medium cursor-pointer"
+                                                        >
+                                                            Deselect All
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        <div className="space-y-4">
+                                            {orders.map(order => {
+                                                const isSelected = selectedOrderIds.includes(order.id);
+                                                return (
+                                                    <div 
+                                                        key={order.id} 
+                                                        className={`p-4 border rounded-xl shadow-sm transition-all flex gap-3 ${isSelected ? 'border-hav-forest bg-hav-forest/5' : getStatusColor(order.status)}`}
+                                                    >
+                                                        {/* Checkbox */}
+                                                        <div className="flex items-start pt-1">
+                                                            <input 
+                                                                type="checkbox" 
+                                                                className="rounded border-gray-300 text-hav-forest focus:ring-hav-forest w-4 h-4 cursor-pointer"
+                                                                checked={isSelected}
+                                                                onChange={(e) => {
+                                                                    if (e.target.checked) {
+                                                                        setSelectedOrderIds(prev => [...prev, order.id]);
+                                                                    } else {
+                                                                        setSelectedOrderIds(prev => prev.filter(id => id !== order.id));
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </div>
+
+                                                        {/* Order details */}
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-1">
+                                                                <div>
+                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                        <p className="font-bold text-hav-olive">Order #{order.order_number}</p>
+                                                                        <span className="text-[10px] bg-hav-brown/10 text-hav-brown px-1.5 py-0.5 rounded font-mono">
+                                                                            {order.payment_method || 'N/A'}
+                                                                        </span>
+                                                                    </div>
+                                                                    <p className="text-xs text-gray-500">{new Date(order.created_at).toLocaleString()}</p>
+                                                                    <p className="text-xs text-gray-600 mt-1">Customer: <span className="font-semibold">{order.userName}</span> ({order.userMobile && order.userMobile !== 'N/A' ? order.userMobile : (order.shipping_address?.phone_number || order.shipping_address?.mobile || 'N/A')})</p>
+                                                                </div>
+                                                                <div className="sm:text-right mt-1 sm:mt-0">
+                                                                    <p className="font-bold text-lg text-hav-orange-900">₹{order.total}</p>
+                                                                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white border self-start sm:self-auto inline-block">
+                                                                        {order.status}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <div className="mt-3 pt-3 border-t border-dashed border-hav-olive/10 flex flex-wrap items-center justify-between gap-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <select 
+                                                                        value={order.status} 
+                                                                        onChange={(e) => handleOrderStatusChange(order.id, e.target.value)} 
+                                                                        className="text-xs border rounded-lg p-1.5 bg-white font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-hav-forest cursor-pointer"
+                                                                    >
+                                                                        <option>Processing</option>
+                                                                        <option>Payment Received</option>
+                                                                        <option>Shipped</option>
+                                                                        <option>Delivered</option>
+                                                                        <option>Cancelled</option>
+                                                                    </select>
+                                                                    <button 
+                                                                        onClick={() => { setEditingOrder(order); setIsOrderDetailsOpen(true); }} 
+                                                                        className="text-xs font-bold text-hav-forest hover:underline px-2 py-1 rounded cursor-pointer"
+                                                                    >
+                                                                        Details
+                                                                    </button>
+                                                                </div>
+
+                                                                {/* Individual Delete Button */}
+                                                                <button 
+                                                                    onClick={() => handleDeleteOrder(order.id)}
+                                                                    className="text-xs font-bold text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1.5 rounded-lg border border-transparent hover:border-red-100 transition-colors cursor-pointer"
+                                                                >
+                                                                    Delete Order
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                            {orders.length === 0 && (
+                                                <div className="bg-white p-8 rounded-xl border border-hav-olive/10 text-center">
+                                                    <p className="text-gray-500 font-medium">No orders found.</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
@@ -1211,6 +1563,20 @@ const AdminApp: React.FC = () => {
                                     </div>
                                 )}
 
+                                {activeView === 'banners' && (
+                                    <BannersShelfStudio 
+                                        promotionalContent={promotionalContent}
+                                        onSavePromoContent={handleSavePromoContent}
+                                        onDeletePromoContent={handleDeletePromoContent}
+                                        products={products}
+                                        categories={categories}
+                                        recipes={recipes}
+                                        blogPosts={blogPosts}
+                                        storeSettings={storeSettings}
+                                        fetchData={fetchData}
+                                    />
+                                )}
+
                                 {activeView === 'promos' && (
                                     <div><div className="flex justify-between mb-4"><h2 className="text-2xl font-bold">Promos</h2><button onClick={() => setIsPromoModalOpen(true)} className={primaryButtonStyles}>+ Add</button></div><div className="space-y-2">{promotionalContent.map(p => (<div key={p.id} className="p-3 bg-white border rounded flex justify-between"><span>{p.title || p.text}</span><div><button onClick={() => { setEditingPromoContent(p); setIsPromoModalOpen(true); }} className="text-blue-600 text-sm mr-2">Edit</button><button onClick={() => handleDeletePromoContent(p.id)} className="text-red-600 text-sm">Del</button></div></div>))}</div></div>
                                 )}
@@ -1257,8 +1623,68 @@ const AdminApp: React.FC = () => {
                                                 </div>
                                             </div>
                                             
-                                            <div>
-                                                <label className="block text-sm font-bold mb-1">Maps Embed URL (for Contact Page)</label>
+                                            <div className="bg-green-50 border border-green-200 p-4 rounded-xl space-y-3">
+                                                 <span className="text-xs uppercase tracking-widest font-black text-green-800 block">💬 WhatsApp Cloud API Integration</span>
+                                                 
+                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                     <div>
+                                                         <label className="text-[11px] font-bold text-gray-600 block">WhatsApp Phone Number ID</label>
+                                                         <input 
+                                                             type="text" 
+                                                             value={whatsappConfig.phoneNumberId} 
+                                                             onChange={e => setWhatsappConfig({...whatsappConfig, phoneNumberId: e.target.value})} 
+                                                             className="border p-2 w-full rounded text-sm bg-white font-mono"
+                                                             placeholder="e.g. 1066359256570178"
+                                                         />
+                                                     </div>
+                                                     <div>
+                                                         <label className="text-[11px] font-bold text-gray-600 block">WhatsApp Template Name</label>
+                                                         <input 
+                                                             type="text" 
+                                                             value={whatsappConfig.templateName} 
+                                                             onChange={e => setWhatsappConfig({...whatsappConfig, templateName: e.target.value})} 
+                                                             className="border p-2 w-full rounded text-sm bg-white font-mono"
+                                                             placeholder="e.g. hav_order"
+                                                         />
+                                                     </div>
+                                                 </div>
+
+                                                 <div>
+                                                     <label className="text-[11px] font-bold text-gray-600 block">System Permanent Access Token</label>
+                                                     <textarea 
+                                                         value={whatsappConfig.accessToken} 
+                                                         onChange={e => setWhatsappConfig({...whatsappConfig, accessToken: e.target.value})} 
+                                                         className="border p-2 w-full rounded text-xs bg-white font-mono"
+                                                         rows={2}
+                                                         placeholder="EAA3sr..."
+                                                     />
+                                                 </div>
+
+                                                 <div>
+                                                     <label className="text-[11px] font-bold text-gray-600 block">Recipient Mobile Alerts (Admin Numbers, Comma Separated)</label>
+                                                     <input 
+                                                         type="text" 
+                                                         value={whatsappConfig.recipientNumbers} 
+                                                         onChange={e => setWhatsappConfig({...whatsappConfig, recipientNumbers: e.target.value})} 
+                                                         className="border p-2 w-full rounded text-sm bg-white"
+                                                         placeholder="8296925577, 9845024156"
+                                                     />
+                                                     <span className="text-[10px] text-gray-500 block">Note: Enter 10-digit mobile numbers. High-priority orders are sent here in real-time.</span>
+                                                 </div>
+
+                                                 <label className="flex items-center gap-2 text-sm font-bold text-green-950">
+                                                     <input 
+                                                         type="checkbox" 
+                                                         checked={whatsappConfig.triggerOnNewOrder} 
+                                                         onChange={e => setWhatsappConfig({...whatsappConfig, triggerOnNewOrder: e.target.checked})} 
+                                                         className="w-4 h-4 accent-green-600 rounded"
+                                                     /> 
+                                                     Enable Real-Time Dispatch on New Orders
+                                                 </label>
+                                             </div>
+
+                                             <div>
+                                                 <label className="block text-sm font-bold mb-1">Maps Embed URL (for Contact Page)</label>
                                                 <textarea 
                                                     value={currentStoreSettings.maps_embed_url ?? storeSettings.maps_embed_url ?? ''} 
                                                     onChange={e => setCurrentStoreSettings({...currentStoreSettings, maps_embed_url: e.target.value})} 

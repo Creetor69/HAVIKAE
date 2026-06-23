@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import confetti from 'canvas-confetti';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 import ShopPage from './pages/ShopPage';
@@ -12,12 +13,14 @@ import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import ProfilePage from './pages/ProfilePage';
 import CheckoutPage from './pages/CheckoutPage';
+import CartPage from './pages/CartPage';
 import WishlistPage from './pages/WishlistPage';
 import ComparePage from './pages/ComparePage';
 import LoadingSpinner from './components/LoadingSpinner';
 import { User, Order, AuthCredentials, NewUser, CartItem, Product, Profile, OrderItem, OrderInsert, Coupon, Address, WishlistItem, PromotionalContent, LegalDocument, SaleBanner, StoreSettings, Category, ProductVariant, BlogPost, Page, PageContext, PageContent, AboutSection, AppNotification } from './types';
 import { recipesData } from './data/recipes';
 import { productsData } from './data/products';
+
 import { supabase, supabaseInitializationError } from './supabaseClient';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import LegalDocumentPage from './pages/LegalDocumentPage';
@@ -41,18 +44,183 @@ type IncrementStockArgs = { p_variant_id: string; p_quantity: number };
 
 const triggerWebsiteOrderWhatsApp = async (order: any, userName: string, userMobile: string) => {
   try {
-    console.log(`[WEBSITE] Triggering backend automated WhatsApp for customer: ${userMobile}`);
-    await fetch(`/api/online/send-whatsapp-order`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        order,
-        userName,
-        userMobile
-      })
+    console.log(`[WEBSITE] Triggering automated WhatsApp for customer: ${userMobile}`);
+    
+    // Check if we have verified WhatsApp config in browser local storage
+    const saved = localStorage.getItem('hav_whatsapp_config');
+    if (saved) {
+      const config = JSON.parse(saved);
+      if (config.accessToken && config.phoneNumberId) {
+        console.log("[WEBSITE WHATSAPP] Custom POS credentials found in localStorage. Syncing with exact same offline mechanism!");
+        
+        const cleanAndFormatMobile = (num: string) => {
+          let sanitized = num.replace(/\D/g, '');
+          if (sanitized.startsWith('0')) {
+            sanitized = sanitized.substring(1);
+          }
+          if (sanitized.length < 10) return null;
+          if (sanitized.startsWith('91') && sanitized.length === 12) {
+            return sanitized;
+          }
+          if (sanitized.length === 10) {
+            return '91' + sanitized;
+          }
+          return sanitized;
+        };
+
+        const targetNumbers: string[] = [];
+        const customerNum = cleanAndFormatMobile(userMobile || order.shipping_address?.phone_number || '');
+        if (customerNum) targetNumbers.push(customerNum);
+
+        const configuredAlerts = config.recipientNumbers 
+          ? config.recipientNumbers.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : ['8296925577', '9845024156'];
+
+        for (const alert of configuredAlerts) {
+          const cleanAlert = cleanAndFormatMobile(alert);
+          if (cleanAlert && !targetNumbers.includes(cleanAlert)) {
+            targetNumbers.push(cleanAlert);
+          }
+        }
+
+        // Explicitly guarantee both admin alert numbers are pushed!
+        const adminFallback1 = cleanAndFormatMobile('8296925577');
+        const adminFallback2 = cleanAndFormatMobile('9845024156');
+        if (adminFallback1 && !targetNumbers.includes(adminFallback1)) {
+          targetNumbers.push(adminFallback1);
+        }
+        if (adminFallback2 && !targetNumbers.includes(adminFallback2)) {
+          targetNumbers.push(adminFallback2);
+        }
+
+        const isPaid = order.payment_id || order.payment_method === 'Razorpay' || order.status === 'Payment Received' || order.payment_status === 'Paid Full';
+        const displayPaymentStatus = isPaid
+          ? "Paid securely! 💳 Thank you"
+          : `Payment due: ₹${order.total}`;
+
+        const templateName = "hav_order";
+        const languageCode = config.languageCode || "en";
+
+
+        const productsSummary = Array.isArray(order.items)
+          ? order.items.map((item: any) => `${item.quantity}x ${item.name || 'Product'}${item.net_weight ? ` (${item.net_weight})` : ''}`).join(', ')
+          : 'Traditional Foods';
+
+        const orderIdStr = String(order.order_number || (typeof order.id === 'string' && order.id.includes('-') ? order.id.split('-')[1].toUpperCase() : order.id));
+
+        for (const recipient of targetNumbers) {
+          const whatsappPayload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: recipient,
+            type: "template",
+            template: {
+              name: templateName,
+              language: { code: languageCode },
+              components: [
+                {
+                  type: "body",
+                  parameters: [
+                    { type: "text", text: userName || order.shipping_address?.name || 'Customer' }, // {{1}} Name
+                    { type: "text", text: orderIdStr }, // {{2}} Order ID
+                    { type: "text", text: productsSummary.slice(0, 1020) }, // {{3}} Products
+                    { type: "text", text: `₹${order.total}` }, // {{4}} Total Amount
+                    { type: "text", text: displayPaymentStatus }, // {{5}} Payment Status
+                    { type: "text", text: order.status || 'Order Placed' } // {{6}} Order Status
+                  ]
+                }
+              ]
+            }
+          };
+
+          console.log(`[WEBSITE WHATSAPP] Dispatching customized template direct to Meta API for: ${recipient}`);
+          
+          await fetch(`https://graph.facebook.com/v21.0/${config.phoneNumberId}/messages`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${config.accessToken}`
+            },
+            body: JSON.stringify(whatsappPayload)
+          });
+        }
+        return; // Early return because customized POS fallback completed sending successfully!
+      }
+    }
+
+    // Standard fallback direct to Meta Cloud API (replacing backend proxy)
+    const phoneId = (import.meta as any).env.VITE_WHATSAPP_PHONE_NUMBER_ID || '1066359256570178';
+    const token = (import.meta as any).env.VITE_WHATSAPP_ACCESS_TOKEN || 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD';
+    const templateName = (import.meta as any).env.VITE_WHATSAPP_TEMPLATE_NAME || 'hav_order';
+    
+    // Deduplicate and gather all numbers:
+    const targetNumbers = new Set<string>();
+    
+    const cleanAndFormatMobile = (num: string) => {
+      if (!num) return null;
+      let sanitized = num.replace(/\D/g, '');
+      if (sanitized.startsWith('0')) sanitized = sanitized.substring(1);
+      if (sanitized.length < 10) return null;
+      if (sanitized.startsWith('91') && sanitized.length === 12) return sanitized;
+      if (sanitized.length === 10) return '91' + sanitized;
+      return sanitized;
+    };
+
+    // 1. Add customer
+    const custNum = cleanAndFormatMobile(userMobile || order.shipping_address?.phone_number || '');
+    if (custNum) targetNumbers.add(custNum);
+
+    // 2. Add admins
+    const adminNumStr = (import.meta as any).env.VITE_WHATSAPP_RECIPIENT_NUMBERS || '8296925577, 9845024156';
+    adminNumStr.split(',').forEach(num => {
+       const cleanNum = cleanAndFormatMobile(num);
+       if (cleanNum) targetNumbers.add(cleanNum);
     });
+
+    const isPaid = order.payment_id || order.payment_method === 'Razorpay' || order.status === 'Payment Received' || order.payment_status === 'Paid Full';
+    const displayPaymentStatus = isPaid ? "Paid securely! 💳 Thank you" : `Payment due: ₹${order.total}`;
+
+    const productsSummary = Array.isArray(order.items)
+      ? order.items.map((item: any) => `${item.quantity}x ${item.name || 'Product'}${item.net_weight ? ` (${item.net_weight})` : ''}`).join(', ')
+      : 'Traditional Foods';
+
+    const orderIdStr = String(order.order_number || (typeof order.id === 'string' && order.id.includes('-') ? order.id.split('-')[1].toUpperCase() : order.id));
+
+    Array.from(targetNumbers).forEach(async (recipient) => {
+      const payload = {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: recipient,
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: "en" },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                { type: "text", text: userName || order.shipping_address?.name || 'Customer' },
+                { type: "text", text: orderIdStr },
+                { type: "text", text: productsSummary.slice(0, 1020) },
+                { type: "text", text: `₹${order.total}` },
+                { type: "text", text: displayPaymentStatus },
+                { type: "text", text: order.status || 'Order Placed' }
+              ]
+            }
+          ]
+        }
+      };
+
+      await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+    });
+
   } catch (err) {
     console.error("[WEBSITE WHATSAPP] Failed background transmission:", err);
   }
@@ -67,7 +235,7 @@ const parseUrlPath = (pathname: string): { page: Page; context: PageContext } =>
     const pageCandidate = parts[0] as Page;
     const context: PageContext = {};
 
-    const validPages: Page[] = ['home', 'shop', 'product', 'about', 'recipes', 'recipeDetail', 'contact', 'login', 'signup', 'profile', 'checkout', 'wishlist', 'compare', 'legal', 'combos', 'influencer', 'partners', 'sitemap', 'social', 'admin', 'applyInfluencer'];
+    const validPages: Page[] = ['home', 'shop', 'product', 'about', 'recipes', 'recipeDetail', 'contact', 'login', 'signup', 'profile', 'checkout', 'cart', 'wishlist', 'compare', 'legal', 'combos', 'influencer', 'partners', 'sitemap', 'social', 'admin', 'applyInfluencer'];
 
     if (!validPages.includes(pageCandidate)) return { page: 'notFound', context: {} }; 
     
@@ -142,6 +310,26 @@ const App: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  const [isExitIntentOpen, setIsExitIntentOpen] = useState(false);
+
+  useEffect(() => {
+    const handleMouseLeave = (e: MouseEvent) => {
+      // Trigger if mouse moves above viewport and cart has items
+      if (e.clientY < 30 && cart.length > 0) {
+        const alreadyShown = sessionStorage.getItem('havikarExitIntentShown');
+        if (!alreadyShown) {
+          setIsExitIntentOpen(true);
+          sessionStorage.setItem('havikarExitIntentShown', 'true');
+        }
+      }
+    };
+
+    document.addEventListener('mouseleave', handleMouseLeave);
+    return () => {
+      document.removeEventListener('mouseleave', handleMouseLeave);
+    };
+  }, [cart]);
 
   // Persistence Effects
   useEffect(() => {
@@ -254,7 +442,27 @@ const App: React.FC = () => {
             if (productsDataDB) setProducts(productsDataDB.filter((p: any) => !p.is_offline_only));
             setPromotionalContent(getResult(1) || []);
             setLegalDocuments(getResult(2) || []);
-            setStoreSettings(getResult(3));
+            let dbSettings = getResult(3);
+            if (!dbSettings) {
+                dbSettings = {
+                    id: 1,
+                    is_banner_carousel_enabled: true,
+                    global_banner_duration: 7
+                };
+            }
+            try {
+                const localEnabled = localStorage.getItem('hav_is_banner_carousel_enabled');
+                const localDuration = localStorage.getItem('hav_global_banner_duration');
+                if (localEnabled !== null) {
+                    dbSettings.is_banner_carousel_enabled = JSON.parse(localEnabled);
+                }
+                if (localDuration !== null) {
+                    dbSettings.global_banner_duration = Number(localDuration);
+                }
+            } catch (e) {
+                console.error("Local storage settings fallback error:", e);
+            }
+            setStoreSettings(dbSettings);
             setCategories(getResult(4) || []);
             setSaleBanner(getResult(5));
             setAboutPageContent(getResult(6));
@@ -331,6 +539,16 @@ const App: React.FC = () => {
         throw orderError;
     }
 
+    // Update wallet reward points: deduct redeemed points and add 5% cashback on the order total
+    const earnedRefund = Number((finalTotal * 0.05).toFixed(2));
+    const updatedPoints = Math.round((Math.max(0, (user.reward_points || 0) - options.pointsToRedeem + earnedRefund)) * 100) / 100;
+    supabase!.from('profiles').update({ reward_points: updatedPoints }).eq('id', user.id)
+        .then(({ error }) => {
+            if (error) console.error("Wallet update failed:", error);
+            else console.log(`Wallet updated. Deducted: ${options.pointsToRedeem}, Added: ${earnedRefund}, New balance: ${updatedPoints}`);
+        });
+    setUser(prev => prev ? { ...prev, reward_points: updatedPoints } : null);
+
     // 3. BACKGROUND ACTIONS: Do not 'await' these to ensure the user sees the success screen immediately
     
     // A. Internal Notification
@@ -362,7 +580,38 @@ const App: React.FC = () => {
     // D. Automatic Customer WhatsApp Confirmation
     triggerWebsiteOrderWhatsApp(insertedOrder, user.name || '', sanitizedAddress.phone_number || '');
 
+    // E. Export to Google Sheets 
+    const sheetsWebhookUrl = (import.meta as any).env.VITE_GOOGLE_SHEETS_WEBHOOK_URL;
+    if (sheetsWebhookUrl) {
+      fetch(sheetsWebhookUrl, {
+          method: 'POST',
+          mode: 'no-cors', // Apps script webhooks often require no-cors to prevent preflight blockage on some clients
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_id: String(insertedOrder.order_number || insertedOrder.id),
+            date: new Date().toLocaleDateString(),
+            customer_name: insertedOrder.shipping_address?.name || user.name || 'N/A',
+            phone: insertedOrder.shipping_address?.phone_number || 'N/A',
+            address: `${insertedOrder.shipping_address?.address || ''}, ${insertedOrder.shipping_address?.city || ''}, ${insertedOrder.shipping_address?.state || ''} - ${insertedOrder.shipping_address?.zip_code || ''}`,
+            amount: insertedOrder.total,
+            payment_status: insertedOrder.payment_id || insertedOrder.payment_method === 'Razorpay' ? 'Paid' : 'Pending',
+            order_status: insertedOrder.status,
+            products: Array.isArray(insertedOrder.items) ? insertedOrder.items.map((i: any) => `${i.quantity}x ${i.name}`).join(', ') : ''
+          })
+      })
+      .then(() => console.log('[GOOGLE SHEETS] Sync complete response'))
+      .catch(e => console.error('[GOOGLE SHEETS] Request failed:', e));
+    } else {
+      console.log('[GOOGLE SHEETS] Sync bypassed. Webhook URL not provided in VITE_GOOGLE_SHEETS_WEBHOOK_URL');
+    }
+
     // 4. Cleanup UI State
+    if (user && supabase) {
+        supabase.from('cart_items').delete().eq('user_id', user.id)
+            .then(({ error }) => {
+                if (error) console.error("Database order cart cleanup error:", error);
+            });
+    }
     setCart([]);
     fetchAllApplicationData(true);
     
@@ -394,6 +643,14 @@ const App: React.FC = () => {
   const addToCart = async (product: Product, selectedVariant: ProductVariant, quantity: number = 1) => {
     if (quantity > selectedVariant.stock_quantity) { alert(`Only ${selectedVariant.stock_quantity} left!`); return; }
     
+    // Colorful celebratory South Indian harvest theme confetti bursts
+    confetti({
+        particleCount: 150,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ['#0F4A3C', '#F48E2F', '#D1A153', '#FFFFFF']
+    });
+
     const newItem: CartItem = { 
       productId: product.id, 
       variantId: selectedVariant.id, 
@@ -409,11 +666,16 @@ const App: React.FC = () => {
 
     setCart(prev => {
         const existing = prev.find(item => item.variantId === selectedVariant.id);
-        if (existing) return prev.map(item => item.variantId === selectedVariant.id ? { ...item, quantity: item.quantity + quantity } : item);
-        return [...prev, newItem];
+        
+        if (existing) {
+            return prev.map(item => item.variantId === selectedVariant.id ? { ...item, quantity: item.quantity + quantity } : item);
+        } else {
+            return [...prev, newItem];
+        }
     });
 
     if (user && supabase) {
+        // Current item
         const { data: existing } = await supabase.from('cart_items').select('quantity').eq('user_id', user.id).eq('variant_id', selectedVariant.id).maybeSingle();
         if (existing) {
             await supabase.from('cart_items').update({ quantity: existing.quantity + quantity }).eq('user_id', user.id).eq('variant_id', selectedVariant.id);
@@ -504,19 +766,20 @@ const App: React.FC = () => {
   const pageContent = () => {
     try {
       switch (currentPage) {
-        case 'home': return <HomePage navigateTo={navigateTo} products={products} promotionalContent={promotionalContent} openQuickView={openQuickView} categories={categories} storeSettings={storeSettings} />;
+        case 'home': return <HomePage navigateTo={navigateTo} products={products} promotionalContent={promotionalContent} openQuickView={openQuickView} categories={categories} storeSettings={storeSettings} addToCart={addToCart} />;
         case 'shop': return <ShopPage navigateTo={navigateTo} products={products} initialCategory={pageContext.category} wishlist={wishlist} addToWishlist={addToWishlist} removeFromWishlist={removeFromWishlist} storeSettings={storeSettings} categories={categories} openQuickView={openQuickView} addToCart={addToCart} onBuyNow={handleBuyNow} />;
         case 'product': return pageContext.productId ? <ProductPage productId={pageContext.productId} user={user} navigateTo={navigateTo} addToCart={addToCart} onBuyNow={handleBuyNow} products={products} cart={cart} wishlist={wishlist} addToWishlist={addToWishlist} removeFromWishlist={removeFromWishlist} openQuickView={openQuickView} /> : <NotFoundPage navigateTo={navigateTo} />;
         case 'combos': return <CombosPage products={products} navigateTo={navigateTo} addToCart={addToCart} />;
         case 'about': return <AboutPage navigateTo={navigateTo} sections={aboutSections} />;
         case 'recipes': return <RecipesPage navigateTo={navigateTo} products={products} />;
-        case 'recipeDetail': const r = recipesData.find(r => r.id === pageContext.recipeId); return r ? <RecipeDetailPage recipe={r} navigateTo={navigateTo} products={products} /> : <NotFoundPage navigateTo={navigateTo} />;
+        case 'recipeDetail': const r = recipesData.find(r => r.id === pageContext.recipeId); return r ? <RecipeDetailPage recipe={r} navigateTo={navigateTo} products={products} addToCart={addToCart} /> : <NotFoundPage navigateTo={navigateTo} />;
         case 'contact': return <ContactPage />;
         case 'login': return <LoginPage onLogin={handleLogin} navigateTo={navigateTo} />;
         case 'signup': return <SignUpPage onSignUp={handleSignUp} navigateTo={navigateTo} />;
         case 'profile': return user ? <ProfilePage user={user} onLogout={handleLogout} updateOrderStatus={async (orderId, status) => { await supabase!.from('orders').update({ status }).eq('id', orderId); }} navigateTo={navigateTo} addToCart={addToCart} products={products} /> : <LoginPage onLogin={handleLogin} navigateTo={navigateTo} />;
         case 'checkout': return user ? <CheckoutPage cart={cart} placeOrder={placeOrder} navigateTo={navigateTo} user={user} storeSettings={storeSettings} products={products} categories={categories} updateCartQuantity={updateCartQuantity} removeFromCart={removeFromCart} /> : <LoginPage onLogin={handleLogin} navigateTo={navigateTo} />;
-        case 'wishlist': return <WishlistPage wishlist={wishlist} products={products} navigate To={navigateTo} addToWishlist={addToWishlist} removeFromWishlist={removeFromWishlist} openQuickView={openQuickView} addToCart={addToCart} onBuyNow={handleBuyNow} />;
+        case 'cart': return <CartPage cart={cart} navigateTo={navigateTo} updateCartQuantity={updateCartQuantity} removeFromCart={removeFromCart} storeSettings={storeSettings} products={products} user={user} addToCart={addToCart} />;
+        case 'wishlist': return <WishlistPage wishlist={wishlist} products={products} navigateTo={navigateTo} addToWishlist={addToWishlist} removeFromWishlist={removeFromWishlist} openQuickView={openQuickView} addToCart={addToCart} onBuyNow={handleBuyNow} />;
         case 'applyInfluencer': return <InfluencerApplyPage user={user} navigateTo={navigateTo} />;
         case 'influencer': return <InfluencerPage user={user} createInfluencerCoupon={async () => true} requestWithdrawal={async () => true} storeSettings={storeSettings} navigateTo={navigateTo} />;
         case 'legal': {
@@ -540,9 +803,98 @@ const App: React.FC = () => {
   const handleBuyNow = async (p: Product, v: ProductVariant, q: number) => { await addToCart(p, v, q); navigateTo('checkout'); };
 
   return (
-    <Layout navigateTo={navigateTo} currentRoute={currentRoute} user={user} onLogout={handleLogout} cart={cart} isCartOpen={isCartOpen} toggleCart={() => setIsCartOpen(!isCartOpen)} updateCartQuantity={updateCartQuantity} removeFromCart={removeFromCart} navigateToCheckout={() => navigateTo('checkout')} isSearchOpen={isSearchOpen} toggleSearch={() => setIsSearchOpen(!isSearchOpen)} products={products} wishlist={wishlist} saleBanner={saleBanner} categories={categories} recipes={recipesData} blogPosts={blogPosts} logoUrl={storeSettings?.logo_url} storeSettings={storeSettings} notifications={notifications} unreadCount={unreadCount} markAsRead={markNotificationAsRead}>
-      {pageContent()}
-    </Layout>
+    <>
+      <Layout navigateTo={navigateTo} currentRoute={currentRoute} user={user} onLogout={handleLogout} cart={cart} isCartOpen={isCartOpen} toggleCart={() => setIsCartOpen(!isCartOpen)} updateCartQuantity={updateCartQuantity} removeFromCart={removeFromCart} navigateToCheckout={() => navigateTo('cart')} isSearchOpen={isSearchOpen} toggleSearch={() => setIsSearchOpen(!isSearchOpen)} products={products} wishlist={wishlist} saleBanner={saleBanner} categories={categories} recipes={recipesData} blogPosts={blogPosts} logoUrl={storeSettings?.logo_url} storeSettings={storeSettings} notifications={notifications} unreadCount={unreadCount} markAsRead={markNotificationAsRead}>
+        {pageContent()}
+      </Layout>
+
+      {/* 🎯 Premium Cart Exit-Intent Recovery Modal Overlay */}
+      {isExitIntentOpen && (
+          <div className="fixed inset-0 bg-black/75 z-[150] flex items-center justify-center p-4 backdrop-blur-xs animate-fadeIn">
+              <div 
+                  className="bg-white rounded-3xl overflow-hidden max-w-sm w-full border border-hav-gold/20 shadow-2xl relative"
+                  onClick={e => e.stopPropagation()}
+              >
+                  {/* Close button */}
+                  <button 
+                      onClick={() => setIsExitIntentOpen(false)}
+                      className="absolute top-3 right-3 text-gray-400 hover:text-hav-forest bg-gray-100 hover:bg-gray-200 transition-colors w-7 h-7 flex items-center justify-center rounded-full z-10 cursor-pointer"
+                  >
+                      ✕
+                  </button>
+
+                  {/* Header visual banner */}
+                  <div className="bg-gradient-to-br from-hav-forest via-[#13493C] to-hav-olive text-hav-gold p-5 text-center relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-white/5 rounded-full filter blur-xl transform translate-x-8 -translate-y-8 shrink-0 pointer-events-none" />
+                      
+                      <span className="text-3xl block mb-1 select-none">🎁</span>
+                      <h3 className="text-lg font-serif font-bold text-white tracking-wide leading-snug">
+                          Wait! Don't go empty-handed...
+                      </h3>
+                      <p className="text-[9px] text-hav-gold/90 mt-1 uppercase font-black tracking-widest font-sans">
+                          Exclusive Instant Recovery Deal
+                      </p>
+                  </div>
+
+                  {/* Content body */}
+                  <div className="p-5 text-center space-y-3">
+                      <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100 shadow-inner">
+                          <p className="text-[10px] text-hav-olive font-extrabold uppercase tracking-wide">
+                              Get Flat Discount on your Bag!
+                          </p>
+                          <p className="text-3xl font-black text-hav-orange-700 tracking-tight mt-1 font-sans">
+                              ₹100 OFF
+                          </p>
+                          <p className="text-[9px] text-gray-500 mt-0.5">
+                              On minimum order value of ₹999. Fresh batch dispatched soon!
+                          </p>
+                      </div>
+
+                      {/* Display Coupon Code */}
+                      <div className="bg-gray-50 border border-gray-150 rounded-lg p-2 flex flex-col items-center justify-center">
+                          <p className="text-[8px] uppercase font-bold text-gray-400">Voucher Code</p>
+                          <span className="text-base font-black text-hav-forest tracking-wider font-mono select-all bg-white px-3 py-1 rounded border border-gray-200 mt-0.5">
+                              STEAL100
+                          </span>
+                          <span className="text-[8px] text-hav-orange-600 font-extrabold uppercase tracking-wide mt-1 animate-pulse">
+                              🔥 Expires in 15 minutes!
+                          </span>
+                      </div>
+
+                      {/* Social proof buyer highlight excerpt */}
+                      <div className="text-left border-l-4 border-hav-gold pl-2.5 bg-hav-cream/20 py-1.5 rounded-r-lg">
+                          <p className="text-[9px] italic text-hav-olive leading-relaxed font-serif">
+                              "The organic appeal and traditional taste are sensational. My family could not get enough of the fresh podi mix!"
+                          </p>
+                          <p className="text-[7px] font-black uppercase text-[#0F4A3C] tracking-widest mt-1">
+                              — Lakshmi S., Verified Buyer
+                          </p>
+                      </div>
+
+                      {/* CTA Actions */}
+                      <div className="space-y-1.5 pt-1">
+                          <button 
+                              onClick={() => {
+                                  sessionStorage.setItem('preAppliedCouponCode', 'STEAL100');
+                                  setIsExitIntentOpen(false);
+                                  navigateTo('cart');
+                              }}
+                              className="w-full bg-hav-orange-600 hover:bg-hav-orange-700 text-white font-black py-2.5 rounded-full transition-all transform hover:scale-[1.01] shadow-md hover:shadow-hav-orange-500/10 cursor-pointer uppercase tracking-wider text-[10px] font-sans"
+                          >
+                              Apply Coupon & View Offers
+                          </button>
+                          <button 
+                              onClick={() => setIsExitIntentOpen(false)}
+                              className="w-full text-gray-500 hover:text-hav-forest font-bold text-[9px] uppercase tracking-wider hover:underline"
+                          >
+                              No thanks, I prefer regular price
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+    </>
   );
 };
 

@@ -4,13 +4,33 @@ import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import * as dotenv from "dotenv";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
+
+const supabaseUrl = 'https://someuoatqyrqbkbiqggi.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNvbWV1b2F0cXlycWJrYmlxZ2dpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE0NzY1NTAsImV4cCI6MjA3NzA1MjU1MH0.QXoe4TmT6sIgFRV55aatcErGqC6LNGdt4LSwR063v_A';
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const app = express();
 const PORT = 3000;
 
-app.use(cors());
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-client-info');
+    
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
 app.use(express.json());
 
 const ai = new GoogleGenAI({
@@ -189,37 +209,60 @@ app.post("/api/online/send-whatsapp-order", async (req, res) => {
             return res.status(400).json({ error: "order parameter is required." });
         }
 
-        const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '1066359256570178';
-        const token = process.env.WHATSAPP_ACCESS_TOKEN || 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD';
-        const templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'hav_orders';
+        let phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '1066359256570178';
+        let token = process.env.WHATSAPP_ACCESS_TOKEN || 'EAA3srEndgnwBRuR8l2uyJpNQg61bicvde6X8XZBvZBBfcIvbiJnaH8hKM5oUbzJxxkO5mc3JnoFQvOWKPO53gElRlrshpZCAYb2tZATTjzDLGlZClZBlqtTYCetVsCFXTmIPZBbw3CDrZCMHaKrMSTsWPVec6sUIJbZCiZByhDncRo76B7E89nDDUiAC3tvVZCI5AVZCZCQZDZD';
+        let templateName = process.env.WHATSAPP_TEMPLATE_NAME || 'hav_order';
+        let recipientNumbersRaw = process.env.WHATSAPP_RECIPIENT_NUMBERS || '8296925577, 9845024156';
 
         console.log(`[ONLINE WHATSAPP] Constructing website order WhatsApp template trigger for order ${order.order_number || order.id}`);
 
         // Helper to cleanly sanitize numbers to standard Meta (E.164 without plus) e.g. 91xxxxxxxxxx
         const cleanAndFormatMobile = (num: string) => {
-            const sanitized = num.replace(/\D/g, '');
+            let sanitized = num.replace(/\D/g, '');
+            if (sanitized.startsWith('0')) {
+                sanitized = sanitized.substring(1);
+            }
             if (sanitized.length < 10) return null;
-            return sanitized.startsWith('91') || sanitized.length > 10 ? sanitized : '91' + sanitized;
+            if (sanitized.startsWith('91') && sanitized.length === 12) {
+                return sanitized;
+            }
+            if (sanitized.length === 10) {
+                return '91' + sanitized;
+            }
+            return sanitized;
         };
 
         const targetNumbers: string[] = [];
 
         // 1. Customer's phone number
-        const customerNum = cleanAndFormatMobile(userMobile || order.shipping_address?.phone_number || '');
+        const customerNum = cleanAndFormatMobile(userMobile || order.shipping_address?.phone_number || order.shipping_address?.mobile || '');
         if (customerNum) {
             targetNumbers.push(customerNum);
+            console.log(`[ONLINE WHATSAPP] Identified customer phone number for dispatch: ${customerNum}`);
+        } else {
+            console.warn(`[ONLINE WHATSAPP] Could not identify a valid customer phone number from userMobile: "${userMobile}" or order shipping address.`);
         }
 
-        // 2. Alert Number 1: 8296925577
-        const alert1 = cleanAndFormatMobile('8296925577');
-        if (alert1 && !targetNumbers.includes(alert1)) {
-            targetNumbers.push(alert1);
+        // 2. Alert Numbers from Database (or defaults)
+        const configuredAlerts = recipientNumbersRaw
+            ? recipientNumbersRaw.split(',').map((s: string) => s.trim()).filter(Boolean)
+            : ['8296925577', '9845024156'];
+
+        for (const alert of configuredAlerts) {
+            const cleanAlert = cleanAndFormatMobile(alert);
+            if (cleanAlert && !targetNumbers.includes(cleanAlert)) {
+                targetNumbers.push(cleanAlert);
+            }
         }
 
-        // 3. Alert Number 2: 9845024156
-        const alert2 = cleanAndFormatMobile('9845024156');
-        if (alert2 && !targetNumbers.includes(alert2)) {
-            targetNumbers.push(alert2);
+        // 3. Explicitly verify/push both admin alert numbers to guarantee they receive it
+        const adminFallback1 = cleanAndFormatMobile('8296925577');
+        const adminFallback2 = cleanAndFormatMobile('9845024156');
+        if (adminFallback1 && !targetNumbers.includes(adminFallback1)) {
+            targetNumbers.push(adminFallback1);
+        }
+        if (adminFallback2 && !targetNumbers.includes(adminFallback2)) {
+            targetNumbers.push(adminFallback2);
         }
 
         console.log(`[ONLINE WHATSAPP] Selected destination recipient phone numbers:`, targetNumbers);
@@ -232,6 +275,10 @@ app.post("/api/online/send-whatsapp-order", async (req, res) => {
         const customerNameStr = userName || order.shipping_address?.name || 'Customer';
         const orderRefStr = order.order_number || order.id.split('-')[1]?.toUpperCase() || 'ORDER';
         const billAmtStr = `₹${order.total}`;
+
+        const productsSummary = Array.isArray(order.items)
+            ? order.items.map((item: any) => `${item.quantity}x ${item.name || 'Product'}${item.net_weight ? ` (${item.net_weight})` : ''}`).join(', ')
+            : 'Traditional Foods';
 
         const results = [];
 
@@ -250,10 +297,12 @@ app.post("/api/online/send-whatsapp-order", async (req, res) => {
                         {
                             type: "body",
                             parameters: [
-                                { type: "text", text: customerNameStr },
-                                { type: "text", text: orderRefStr },
-                                { type: "text", text: billAmtStr },
-                                { type: "text", text: displayPaymentStatus }
+                                { type: "text", text: customerNameStr }, // {{1}} Name
+                                { type: "text", text: orderRefStr }, // {{2}} Order ID
+                                { type: "text", text: productsSummary.slice(0, 1020) }, // {{3}} Products
+                                { type: "text", text: billAmtStr }, // {{4}} Total Amount
+                                { type: "text", text: displayPaymentStatus }, // {{5}} Payment Status
+                                { type: "text", text: order.status || 'Order Placed' } // {{6}} Order Status
                             ]
                         }
                     ]
@@ -272,6 +321,7 @@ app.post("/api/online/send-whatsapp-order", async (req, res) => {
                 });
 
                 const data = await response.json();
+                console.log(`[ONLINE WHATSAPP] Facebook Graph API response for recipient ${recipient}:`, JSON.stringify(data));
                 results.push({ recipient, success: response.ok, data });
             } catch (err: any) {
                 console.error(`[ONLINE WHATSAPP] Error sending to ${recipient}:`, err.message);
@@ -283,6 +333,71 @@ app.post("/api/online/send-whatsapp-order", async (req, res) => {
 
     } catch (err: any) {
         console.error("[ONLINE WHATSAPP] Server route failure:", err);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+// 3. Export Order row to Google Sheets (using Google Apps Script Web App Endpoint)
+app.post("/api/orders/export-to-sheet", async (req, res) => {
+    try {
+        const { order } = req.body;
+        if (!order) {
+            return res.status(400).json({ error: "Order is required." });
+        }
+
+        const sheetsWebhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
+        if (!sheetsWebhookUrl) {
+            console.warn("[GOOGLE SHEETS] GOOGLE_SHEETS_WEBHOOK_URL is not set in environment variables. Webhook integration bypassed.");
+            return res.json({ 
+                success: false, 
+                message: "Sheets webhook URL not specified in .env. Order data logged locally instead.",
+                order_id: order.order_number || order.id
+            });
+        }
+
+        const itemsSummary = Array.isArray(order.items)
+            ? order.items.map((item: any) => `${item.quantity}x ${item.name || 'Product'}${item.net_weight ? ` (${item.net_weight})` : ''}`).join(', ')
+            : 'Traditional Products';
+
+        const payload = {
+            order_id: order.order_number || order.id,
+            date: order.created_at || new Date().toISOString(),
+            customer_name: order.shipping_address?.name || 'Customer',
+            mobile: order.shipping_address?.phone_number || '',
+            address: `${order.shipping_address?.address_line_1}, ${order.shipping_address?.address_line_2 || ''}`.trim().replace(/,\s*$/, ''),
+            city: order.shipping_address?.city || '',
+            state: order.shipping_address?.state || '',
+            postal_code: order.shipping_address?.postal_code || '',
+            items: itemsSummary,
+            total_amount: order.total,
+            shipping_amount: order.shipping_amount || 0,
+            discount_amount: order.discount_amount || 0,
+            coupon_code: order.coupon_code || '',
+            payment_method: order.payment_method || 'N/A',
+            payment_status: order.payment_status || order.status || 'Pending'
+        };
+
+        console.log(`[GOOGLE SHEETS] Exporting order ${payload.order_id} to Google Sheets...`);
+
+        const response = await fetch(sheetsWebhookUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            console.log(`[GOOGLE SHEETS] Sync success for order ${payload.order_id}`);
+            return res.json({ success: true, message: "Successfully exported to Google Sheets!" });
+        } else {
+            const body = await response.text();
+            console.error(`[GOOGLE SHEETS] Target sheet rejected payload:`, body);
+            return res.status(500).json({ error: "Google sheets rejected order export sync.", details: body });
+        }
+
+    } catch (err: any) {
+        console.error("[GOOGLE SHEETS] Network integration error:", err);
         return res.status(500).json({ error: err.message });
     }
 });

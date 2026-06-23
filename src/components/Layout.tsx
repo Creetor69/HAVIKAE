@@ -11,6 +11,7 @@ import SaleCountdownBanner from './SaleCountdownBanner';
 import StickyCouponBanner from './StickyCouponBanner';
 import { Page, PageContext, AppNotification } from '../types';
 import type { User, CartItem, Product, SaleBanner, Category, Recipe, BlogPost, StoreSettings } from '../types';
+import { useLiteMode } from '../hooks/useLiteMode';
 
 
 interface LayoutProps {
@@ -87,6 +88,16 @@ const Layout: React.FC<LayoutProps> = ({
   unreadCount,
   markAsRead
 }) => {
+  const { isLiteMode } = useLiteMode();
+
+  const activeVariants = isLiteMode ? {
+    initial: { opacity: 1, y: 0 },
+    in: { opacity: 1, y: 0 },
+    out: { opacity: 1, y: 0 }
+  } : pageVariants;
+
+  const activeTransition: Transition = isLiteMode ? { duration: 0 } : pageTransition;
+
   return (
     <div className="bg-transparent text-hav-olive font-sans min-h-screen flex flex-col">
       <div className="sticky top-0 z-50 shadow-md">
@@ -110,7 +121,12 @@ const Layout: React.FC<LayoutProps> = ({
           markAsRead={markAsRead}
         />
         {/* Banner now sits inside the sticky container, below Breadcrumbs (which are in Header) */}
-        <StickyCouponBanner cart={cart} navigateTo={navigateTo} />
+        <StickyCouponBanner 
+          cart={cart} 
+          navigateTo={navigateTo} 
+          storeSettings={storeSettings} 
+          currentPage={currentRoute.page} 
+        />
       </div>
       <AnimatePresence mode="wait">
         <motion.main
@@ -118,8 +134,8 @@ const Layout: React.FC<LayoutProps> = ({
           initial="initial"
           animate="in"
           exit="out"
-          variants={pageVariants}
-          transition={pageTransition}
+          variants={activeVariants}
+          transition={activeTransition}
           className="flex-grow"
         >
           {children}
@@ -132,6 +148,7 @@ const Layout: React.FC<LayoutProps> = ({
         updateCartQuantity={updateCartQuantity}
         removeFromCart={removeFromCart}
         navigateToCheckout={navigateToCheckout}
+        storeSettings={storeSettings}
       />
       <SearchOverlay 
         isOpen={isSearchOpen}
@@ -140,7 +157,7 @@ const Layout: React.FC<LayoutProps> = ({
         products={products}
       />
 
-      <WhatsAppFloat />
+      <WhatsAppFloat whatsappNumber={storeSettings?.whatsapp_number} />
 
       <Footer navigateTo={navigateTo} storeSettings={storeSettings} />
     </div>

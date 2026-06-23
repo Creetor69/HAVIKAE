@@ -1,6 +1,7 @@
 
 import React, { Suspense } from 'react';
 import FeaturedProducts from '../components/FeaturedProducts';
+import Bestsellers from '../components/Bestsellers';
 import { Page, PageContext } from '../types';
 import ScrollingHero from '../components/ScrollingHero';
 import ImageCarousel from '../components/ImageCarousel';
@@ -23,6 +24,7 @@ interface HomePageProps {
     openQuickView: (product: Product) => void;
     categories: Category[];
     storeSettings: StoreSettings | null;
+    addToCart?: (product: Product, selectedVariant: any, quantity?: number) => void;
 }
 
 const CategoryGrid: React.FC<{ categories: Category[]; navigateTo: (page: Page, context: PageContext) => void }> = ({ categories, navigateTo }) => {
@@ -97,11 +99,11 @@ const CategoryGrid: React.FC<{ categories: Category[]; navigateTo: (page: Page, 
 };
 
 
-const HomePage: React.FC<HomePageProps> = ({ navigateTo, products, promotionalContent, openQuickView, categories, storeSettings }) => {
-  const imageCarouselSlides = promotionalContent.filter(c => c.type === 'image_carousel');
+const HomePage: React.FC<HomePageProps> = ({ navigateTo, products, promotionalContent, openQuickView, categories, storeSettings, addToCart }) => {
+  const imageCarouselSlides = promotionalContent.filter(c => c.type === 'image_carousel' && c.is_active !== false);
   const textCarouselOffers = promotionalContent.filter(c => c.type === 'text_carousel');
 
-  const imageCarouselDuration = 7; 
+  const imageCarouselDuration = storeSettings?.global_banner_duration || 7; 
 
   const textCarouselDuration = textCarouselOffers.length > 0
     ? Math.max(...textCarouselOffers.map(s => s.carousel_duration_seconds || 0)) || 5
@@ -129,13 +131,28 @@ const HomePage: React.FC<HomePageProps> = ({ navigateTo, products, promotionalCo
         </div>
 
         <div className="flex flex-col">
-            <InfiniteShelf products={products} navigateTo={navigateTo} />
+            {storeSettings?.is_banner_carousel_enabled !== false && imageCarouselSlides.length > 0 && (
+                <div className="w-full px-4 md:px-[5%] py-4 md:py-6">
+                    <div className="rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-lg border border-hav-gold/5">
+                        <ImageCarousel 
+                            navigateTo={navigateTo} 
+                            slides={imageCarouselSlides} 
+                            durationSeconds={imageCarouselDuration} 
+                            products={products}
+                            addToCart={addToCart}
+                        />
+                    </div>
+                </div>
+            )}
+            <InfiniteShelf products={products} navigateTo={navigateTo} storeSettings={storeSettings} />
             <ScrollingHero 
                 navigateTo={navigateTo} 
                 offers={textCarouselOffers} 
                 durationSeconds={textCarouselDuration}
             />
         </div>
+
+        <Bestsellers products={products} navigateTo={navigateTo} openQuickView={openQuickView} />
 
         {/* Grouped Sections: Our Collections & Signature Collection */}
         <section className="mask-both bg-white/40 backdrop-blur-sm rounded-[3rem] mx-2 md:mx-4 my-4 md:my-8 border border-hav-gold/20 shadow-2xl overflow-hidden">

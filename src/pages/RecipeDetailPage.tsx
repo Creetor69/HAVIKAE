@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Product, Recipe, Page, PageContext } from '../types';
+import { Product, Recipe, Page, PageContext, ProductVariant } from '../types';
 import PotIcon from '../components/icons/PotIcon';
 import ScrollIcon from '../components/icons/ScrollIcon';
 import VideoPlayer from '../components/VideoPlayer';
@@ -10,9 +10,10 @@ interface RecipeDetailPageProps {
   recipe: Recipe;
   navigateTo: (page: Page, context?: PageContext) => void;
   products: Product[];
+  addToCart?: (product: Product, selectedVariant: ProductVariant, quantity?: number) => void;
 }
 
-const RecipeDetailPage: React.FC<RecipeDetailPageProps> = ({ recipe, navigateTo, products }) => {
+const RecipeDetailPage: React.FC<RecipeDetailPageProps> = ({ recipe, navigateTo, products, addToCart }) => {
     // Find full product objects based on IDs stored in recipe.products
     const requiredProducts = products.filter(p => recipe.products.includes(p.id));
 
@@ -60,6 +61,23 @@ const RecipeDetailPage: React.FC<RecipeDetailPageProps> = ({ recipe, navigateTo,
                         {requiredProducts.length > 0 && (
                             <div className="bg-white p-6 rounded-lg shadow-sm border border-hav-gold/30">
                                 <h3 className="text-xl font-serif font-bold text-hav-forest mb-4">Shop The Ingredients</h3>
+                                
+                                {addToCart && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            requiredProducts.forEach(prod => {
+                                                const variant = prod.product_variants[0];
+                                                if (variant) addToCart(prod, variant, 1);
+                                            });
+                                            alert("🎉 All recipe ingredients added to your bag!");
+                                        }}
+                                        className="w-full bg-linear-to-r from-hav-forest to-hav-olive text-hav-gold hover:brightness-110 font-bold py-3 px-4 rounded-xl transition-all text-[11px] uppercase tracking-widest mb-4 shadow-md flex items-center justify-center gap-2 active:scale-95"
+                                    >
+                                        🛒 Add Recipe Ingredients to Bag
+                                    </button>
+                                )}
+
                                 <div className="space-y-4">
                                     {requiredProducts.map(product => (
                                         <div 

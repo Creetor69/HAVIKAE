@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS product_combos (
 -- 4. Store settings & Analytics enhancements
 ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS carousel_background_color TEXT;
 ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS razorpay_key_id TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_template_name TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_recipient_numbers TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS commission_earned NUMERIC DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_amount NUMERIC DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC DEFAULT 0;

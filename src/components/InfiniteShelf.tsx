@@ -1,31 +1,138 @@
-
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Star, ShoppingBag, MapPin, ShieldAlert, Sparkles } from 'lucide-react';
 import { Product, Page, PageContext } from '../types';
 
 interface InfiniteShelfProps {
     products: Product[];
     navigateTo: (page: Page, context?: PageContext) => void;
+    storeSettings?: any;
 }
 
-const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) => {
+interface InfiniteShelfConfig {
+    isActive: boolean;
+    line1: string;
+    line2: string;
+    underlineText: string;
+    btn1Text: string;
+    btn1Page: string;
+    btn1ExternalUrl: string;
+    btn1_x?: number;
+    btn1_y?: number;
+    btn2Text: string;
+    btn2Page: string;
+    btn2ExternalUrl: string;
+    btn2_x?: number;
+    btn2_y?: number;
+}
+
+const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo, storeSettings }) => {
+    const [config, setConfig] = useState<InfiniteShelfConfig>({
+        isActive: true,
+        line1: "Eat traditional.",
+        line2: "Live Better.",
+        underlineText: "Live Better.",
+        btn1Text: "Order Today!",
+        btn1Page: "shop",
+        btn1ExternalUrl: "",
+        btn1_x: 40,
+        btn1_y: 80,
+        btn2Text: "Explore Bundles",
+        btn2Page: "combos",
+        btn2ExternalUrl: "",
+        btn2_x: 60,
+        btn2_y: 80
+    });
+
+    // Sync configuration from local storage built in the admin panel
+    useEffect(() => {
+        const loadConfig = () => {
+            try {
+                // First attempt loading from DB storeSettings
+                if (storeSettings && storeSettings.infinite_shelf_config) {
+                    setConfig(prev => ({
+                        ...prev,
+                        ...storeSettings.infinite_shelf_config
+                    }));
+                    return;
+                }
+
+                // Fallback to localStorage
+                const saved = localStorage.getItem('hav_infinite_shelf_config');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    setConfig(prev => ({
+                        ...prev,
+                        ...parsed
+                    }));
+                }
+            } catch (e) {
+                console.warn("Could not read infinite shelf config:", e);
+            }
+        };
+
+        loadConfig();
+        // Respond to storage changes (e.g. from admin panel in same origin)
+        window.addEventListener('storage', loadConfig);
+        return () => window.removeEventListener('storage', loadConfig);
+    }, [storeSettings]);
+
     // Ensure we have enough items for a seamless loop on any screen size
     const duplicationFactor = Math.max(10, products.length > 0 ? Math.ceil(40 / products.length) : 0);
     const shelfProducts = Array(duplicationFactor).fill(products).flat();
     
     useEffect(() => {
+        if (!config.isActive) return;
+        
         // Auto-center the shelf on load
         const shelfElement = document.getElementById('infinite-shelf');
         if (shelfElement) {
             const rect = shelfElement.getBoundingClientRect();
-            // Scroll to the top of the shelf minus header height (approx 80px) so it fits in screen
             const scrollTarget = window.scrollY + rect.top - 80;
             window.scrollTo({ top: scrollTarget, behavior: 'smooth' });
         }
-    }, [products.length]); // Re-center if products load later
+    }, [products.length, config.isActive]);
+
+    // If turned off in configuration, do not render
+    if (!config.isActive) {
+        return null;
+    }
+
+    const handleButtonClick = (pageKey: string, extUrl: string) => {
+        if (extUrl && extUrl.trim().startsWith('http')) {
+            window.open(extUrl.trim(), '_blank');
+        } else {
+            navigateTo(pageKey as Page);
+        }
+    };
+
+    // Parse whether text should be underlined
+    const renderLineText = (line: string) => {
+        if (!line) return "";
+        const uText = config.underlineText;
+        if (uText && line.toLowerCase().includes(uText.toLowerCase())) {
+            const index = line.toLowerCase().indexOf(uText.toLowerCase());
+            const before = line.substring(0, index);
+            const match = line.substring(index, index + uText.length);
+            const after = line.substring(index + uText.length);
+            return (
+                <span>
+                    {before}
+                    <span className="italic text-hav-wheat relative inline-block mx-1">
+                        {match}
+                        <svg className="absolute -bottom-1 left-0 w-full h-2 text-hav-gold/60" viewBox="0 0 100 10" preserveAspectRatio="none">
+                            <path d="M0 5 C 20 0, 40 10, 60 0, 80 10, 100 5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                        </svg>
+                    </span>
+                    {after}
+                </span>
+            );
+        }
+        return line;
+    };
 
     return (
-        <section id="infinite-shelf" className="relative w-full bg-hav-forest overflow-hidden py-0 perspective-[1500px]">
+        <section id="infinite-shelf" className="relative w-full bg-hav-forest overflow-hidden py-12 md:py-0 mt-20 sm:mt-10 md:mt-0 perspective-[1500px]">
             {/* Ambient Background Glows */}
             <div className="absolute top-0 left-1/4 w-96 h-96 bg-hav-gold/20 rounded-full blur-[120px] animate-pulse pointer-events-none"></div>
             <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-hav-wheat/15 rounded-full blur-[120px] animate-pulse delay-700 pointer-events-none"></div>
@@ -38,8 +145,8 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                 }}
             ></div>
 
-            {/* Row 1: Moving Left - Seamless Loop (Slower) - MOVED TO MIDDLE LAYER */}
-            <div className="flex py-10 md:py-16 relative z-20">
+            {/* Row 1: Moving Left - Seamless Loop */}
+            <div className="flex py-4 md:py-6 relative z-20">
                 <motion.div 
                     className="flex gap-4 md:gap-8 whitespace-nowrap"
                     animate={{ x: ["0%", "-50%"] }}
@@ -53,9 +160,8 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                         <div 
                             key={`${product.id}-row1-${idx}`}
                             onClick={() => navigateTo('product', { productId: product.slug || product.id })}
-                            className="w-24 h-20 md:w-56 md:h-44 bg-white rounded-xl overflow-hidden flex-shrink-0 cursor-pointer group relative border-2 border-white/80 hover:border-white transition-all duration-500 transform-gpu hover:scale-110 shadow-[0_0_25px_rgba(255,255,255,0.4)] hover:shadow-[0_0_50px_rgba(255,255,255,0.9)]"
+                            className="w-20 h-16 md:w-40 md:h-32 bg-white rounded-xl overflow-hidden flex-shrink-0 cursor-pointer group relative border-2 border-white/80 hover:border-white transition-all duration-500 transform-gpu hover:scale-110 shadow-[0_0_25px_rgba(255,255,255,0.4)] hover:shadow-[0_0_50px_rgba(255,255,255,0.9)]"
                         >
-                            {/* Card Highlight - Brighter card background */}
                             <div className="absolute inset-0 bg-white opacity-100"></div>
                             
                             <img 
@@ -75,8 +181,8 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                 </motion.div>
             </div>
 
-            {/* Row 2: Moving Right - Seamless Loop (Slower) - MOVED TO MIDDLE LAYER */}
-            <div className="flex py-10 md:py-16 relative z-20">
+            {/* Row 2: Moving Right - Seamless Loop */}
+            <div className="flex py-4 md:py-6 relative z-20">
                 <motion.div 
                     className="flex gap-4 md:gap-8 whitespace-nowrap"
                     animate={{ x: ["-50%", "0%"] }}
@@ -90,9 +196,8 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                         <div 
                             key={`${product.id}-row2-${idx}`}
                             onClick={() => navigateTo('product', { productId: product.slug || product.id })}
-                            className="w-24 h-20 md:w-56 md:h-44 bg-white rounded-xl overflow-hidden flex-shrink-0 cursor-pointer group relative border-2 border-white/80 hover:border-white transition-all duration-500 transform-gpu hover:scale-110 shadow-[0_0_25px_rgba(255,255,255,0.4)] hover:shadow-[0_0_50px_rgba(255,255,255,0.9)]"
+                            className="w-20 h-16 md:w-40 md:h-32 bg-white rounded-xl overflow-hidden flex-shrink-0 cursor-pointer group relative border-2 border-white/80 hover:border-white transition-all duration-500 transform-gpu hover:scale-110 shadow-[0_0_25px_rgba(255,255,255,0.4)] hover:shadow-[0_0_50px_rgba(255,255,255,0.9)]"
                         >
-                            {/* Card Highlight - Brighter card background */}
                             <div className="absolute inset-0 bg-white opacity-100"></div>
  
                             <img 
@@ -112,7 +217,7 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                 </motion.div>
             </div>
 
-            {/* Floating Particles for Immersion */}
+            {/* Floating Particles */}
             <div className="absolute inset-0 pointer-events-none overflow-hidden z-10">
                 {[...Array(15)].map((_, i) => (
                     <motion.div
@@ -136,54 +241,18 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                 ))}
             </div>
 
-            {/* Centered Overlay Text - Innovative "Tracing" & "Spotlight" Effect with Doodles - MOVED TO FRONT FOR MOBILE CLARITY */}
+            {/* Centered Overlay Text - Innovative "Spotlight" Effect */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
                 <motion.div 
                     initial={{ opacity: 0, scale: 0.9, y: 30 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1] }}
-                    className="text-center px-4 py-8 relative"
+                    className="text-center px-4 py-8 relative pointer-events-auto"
                 >
-                    {/* Softer Radial Spotlight - Reduced intensity to let products shine */}
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.4)_0%,transparent_70%)] blur-xl -z-10 scale-150"></div>
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.6)_0%,transparent_70%)] blur-xl -z-10 scale-150"></div>
 
-                    {/* Hand-drawn Arrow CTA - Innovative Doodle (Orange, Flipped, Left) - MOVED DOWN */}
-                    <motion.div 
-                        className="absolute top-12 -left-12 md:-left-24 w-24 md:w-32 text-orange-500 hidden sm:block"
-                        animate={{ 
-                            y: [0, -10, 0],
-                            rotate: [-15, -10, -15]
-                        }}
-                        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                    >
-                        <div className="relative">
-                            <span className="absolute -top-8 right-0 w-full font-sans font-bold text-[10px] md:text-xs text-white bg-orange-500 px-3 py-1 rounded-full whitespace-nowrap text-center shadow-[0_0_15px_rgba(249,115,22,0.8)] border border-orange-300 animate-pulse">Tap to explore</span>
-                            <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                                <path d="M80,20 C60,20 20,40 30,80" />
-                                <path d="M20,70 L30,80 L40,70" />
-                            </svg>
-                        </div>
-                    </motion.div>
-
-                    {/* Mobile Arrow CTA (Orange) - POSITIONED EXACTLY ABOVE 'PURITY' - DOODLE STYLE */}
-                    <motion.div 
-                        className="absolute -top-12 left-[15%] w-24 text-orange-500 sm:hidden flex flex-col items-center"
-                        animate={{ 
-                            y: [0, -6, 0],
-                            rotate: [-10, -5, -10]
-                        }}
-                        transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                    >
-                        <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="w-12 h-12">
-                            {/* Curved arrow arching upwards towards products */}
-                            <path d="M80,80 C80,30 40,20 20,20" />
-                            <path d="M35,10 L20,20 L35,35" />
-                        </svg>
-                        <span className="block font-sans font-bold text-[9px] text-white bg-orange-500 px-3 py-1 rounded-full mt-1 shadow-[0_0_15px_rgba(249,115,22,0.8)] border border-orange-300 animate-pulse whitespace-nowrap">Tap to explore</span>
-                    </motion.div>
-
-                    {/* Doodle Elements around text */}
-                    <div className="absolute -top-6 -left-6 w-12 h-12 text-hav-gold/30 rotate-[-15deg]">
+                    {/* Doodle Elements */}
+                    <div className="absolute -top-6 -left-6 w-12 h-12 text-hav-gold/30 rotate-[-15deg] pointer-events-none">
                         <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" strokeWidth="3">
                             <path d="M20,80 Q40,20 80,40 T90,90" strokeLinecap="round" />
                             <circle cx="20" cy="80" r="3" fill="currentColor" />
@@ -191,7 +260,7 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                     </div>
 
                     <h1 
-                        className="text-2xl md:text-5xl font-serif font-bold text-hav-gold tracking-tight leading-[1.2] relative"
+                        className="text-4xl md:text-6xl lg:text-7xl font-serif font-bold text-hav-gold tracking-tight leading-[1.2] relative mb-6"
                         style={{
                             textShadow: `
                                 0 0 10px rgba(0,0,0,0.8),
@@ -199,27 +268,15 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                             `
                         }}
                     >
-                        {/* Hand-drawn swirl doodle above Taste */}
                         <div className="absolute -top-4 left-1/4 w-8 h-8 text-hav-gold/40 opacity-50">
                             <svg viewBox="0 0 50 50" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M10,40 C10,10 40,10 40,40 S10,40 25,25" strokeLinecap="round" />
                             </svg>
                         </div>
 
-                        Purity You Can <span className="italic text-hav-wheat relative inline-block">
-                            Taste.
-                            <svg className="absolute -bottom-1 left-0 w-full h-2 text-hav-gold/60" viewBox="0 0 100 10" preserveAspectRatio="none">
-                                <path d="M0 5 C 20 0, 40 10, 60 0, 80 10, 100 5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                            </svg>
-                        </span><br />
-                        Tradition You Can <span className="italic text-hav-wheat relative inline-block">
-                            Trust.
-                            <svg className="absolute -bottom-1 left-0 w-full h-2 text-hav-gold/60" viewBox="0 0 100 10" preserveAspectRatio="none">
-                                <path d="M0 5 C 10 10, 30 0, 50 10, 70 0, 90 10, 100 5" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                            </svg>
-                        </span>
+                        {renderLineText(config.line1)} <br />
+                        {renderLineText(config.line2)}
 
-                        {/* Hand-drawn leaf doodle next to Trust */}
                         <div className="absolute -bottom-2 -right-6 w-6 h-6 text-hav-wheat/40 opacity-50">
                             <svg viewBox="0 0 50 50" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M5,45 Q25,5 45,45 M25,5 L25,45" strokeLinecap="round" />
@@ -227,25 +284,103 @@ const InfiniteShelf: React.FC<InfiniteShelfProps> = ({ products, navigateTo }) =
                         </div>
                     </h1>
                     
-                    <div className="mt-8 md:mt-10 flex items-center justify-center gap-2 px-2">
-                        <div className="h-[1px] w-4 md:w-16 bg-gradient-to-r from-transparent via-hav-gold/40 to-transparent"></div>
-                        <div 
-                            className="px-6 py-2 bg-hav-gold rounded-full border-2 border-hav-forest/20 shadow-[0_0_30px_rgba(201,162,54,0.4)] relative overflow-hidden mx-1"
-                        >
-                            {/* Subtle doodle inside the badge */}
-                            <div className="absolute inset-0 opacity-10 pointer-events-none">
-                                <svg className="w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
-                                    <path d="M0,20 Q25,10 50,20 T100,20" stroke="black" fill="none" strokeWidth="1" />
-                                </svg>
-                            </div>
-                            <span className="text-hav-forest font-sans font-black tracking-[0.3em] text-[10px] md:text-xs uppercase relative z-10 whitespace-nowrap">The Soul of Karnataka</span>
-                        </div>
-                        <div className="h-[1px] w-4 md:w-16 bg-gradient-to-l from-transparent via-hav-gold/40 to-transparent"></div>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8 relative w-full md:min-h-[4rem]">
+                        {config.btn1Text && (
+                            <button 
+                                onClick={() => handleButtonClick(config.btn1Page, config.btn1ExternalUrl)}
+                                className="w-full sm:w-auto px-8 py-3 bg-hav-gold text-hav-forest font-bold tracking-wider uppercase text-sm rounded-full shadow-[0_0_20px_rgba(201,162,54,0.4)] hover:shadow-[0_0_30px_rgba(201,162,54,0.6)] hover:scale-105 transition-all duration-300 md:absolute border-2 border-transparent"
+                                style={{
+                                    left: config.btn1_x !== undefined ? `${config.btn1_x}%` : '40%',
+                                    transform: 'translateX(-50%)',
+                                    backgroundColor: (config as any).btn1BgColor || undefined,
+                                    color: (config as any).btn1TextColor || undefined,
+                                    borderColor: (config as any).btn1BorderColor || undefined,
+                                    borderRadius: (config as any).btn1BorderRadius === 'sharp' ? '0px' :
+                                                  (config as any).btn1BorderRadius === 'rounded-sm' ? '4px' :
+                                                  (config as any).btn1BorderRadius === 'rounded' ? '8px' :
+                                                  (config as any).btn1BorderRadius === 'rounded-xl' ? '14px' :
+                                                  (config as any).btn1BorderRadius === 'pill' ? '9999px' : undefined
+                                }}
+                            >
+                                {config.btn1Text}
+                            </button>
+                        )}
+                        {config.btn2Text && (
+                            <button 
+                                onClick={() => handleButtonClick(config.btn2Page, config.btn2ExternalUrl)}
+                                className="w-full sm:w-auto px-8 py-3 bg-black/40 backdrop-blur-sm border-2 border-hav-gold text-hav-gold font-bold tracking-wider uppercase text-sm rounded-full hover:bg-hav-gold/10 hover:scale-105 transition-all duration-300 md:absolute"
+                                style={{
+                                    left: config.btn2_x !== undefined ? `${config.btn2_x}%` : '60%',
+                                    transform: 'translateX(-50%)',
+                                    backgroundColor: (config as any).btn2BgColor || undefined,
+                                    color: (config as any).btn2TextColor || undefined,
+                                    borderColor: (config as any).btn2BorderColor || undefined,
+                                    borderRadius: (config as any).btn2BorderRadius === 'sharp' ? '0px' :
+                                                  (config as any).btn2BorderRadius === 'rounded-sm' ? '4px' :
+                                                  (config as any).btn2BorderRadius === 'rounded' ? '8px' :
+                                                  (config as any).btn2BorderRadius === 'rounded-xl' ? '14px' :
+                                                  (config as any).btn2BorderRadius === 'pill' ? '9999px' : undefined
+                                }}
+                            >
+                                {config.btn2Text}
+                            </button>
+                        )}
                     </div>
                 </motion.div>
             </div>
 
-            {/* Deep Vignette & Edge Fades - REMOVED SIDES TO AVOID BLANK SPACE FEEL */}
+            {/* Trust Strip - Custom designed as requested for key markers with Star indicators */}
+            <div className="relative z-50 flex justify-center -mt-6 pb-6 w-full">
+                <div className="bg-[#F5F1E5] py-4 px-6 md:py-5 md:px-12 rounded-3xl md:rounded-full border border-hav-gold/40 shadow-[0_10px_40px_rgba(0,0,0,0.25)] w-11/12 md:max-w-max">
+                    <div className="flex flex-wrap items-center justify-center gap-4 md:gap-10">
+                        {/* Rating Card with Gold Stars - Hidden on mobile */}
+                        <div className="hidden sm:flex items-center gap-2.5 group">
+                            <div className="bg-white p-2 rounded-full border border-hav-gold/20 flex items-center justify-center shadow-xs">
+                                <Star className="w-4 h-4 text-amber-500" fill="currentColor" />
+                            </div>
+                            <div className="flex flex-col text-left">
+                                <span className="text-[11px] md:text-sm font-black text-hav-forest drop-shadow-sm leading-none flex items-center gap-1">
+                                    ⭐⭐⭐⭐⭐ <span className="text-amber-600 ml-1">4.8/5 Rating</span>
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Orders Delivered - Hidden on mobile */}
+                        <div className="hidden sm:flex items-center gap-2.5 group">
+                            <div className="bg-white p-2 rounded-full border border-hav-gold/20 flex items-center justify-center shadow-xs">
+                                <ShoppingBag className="w-4 h-4 text-hav-forest" />
+                            </div>
+                            <div className="flex flex-col text-left">
+                                <span className="text-[10px] md:text-xs font-black uppercase tracking-widest text-[#0F4A3C]">Over 1000+ Orders Delivered</span>
+                            </div>
+                        </div>
+
+                        {/* Made in Karnataka - Shown on all sizes with size adaptation */}
+                        <div className="flex items-center gap-2 group">
+                            <div className="bg-white p-1.5 md:p-2 rounded-full border border-hav-gold/20 flex items-center justify-center shadow-xs">
+                                <MapPin className="w-3.5 h-3.5 md:w-4 md:h-4 text-orange-600" fill="currentColor" />
+                            </div>
+                            <div className="flex flex-col text-left">
+                                <span className="text-[9px] md:text-xs font-black uppercase tracking-widest text-orange-700">Made in Karnataka</span>
+                            </div>
+                        </div>
+
+                        {/* Divider for mobile */}
+                        <div className="sm:hidden text-hav-gold/40">•</div>
+
+                        {/* No Preservatives - Shown on all sizes with size adaptation */}
+                        <div className="flex items-center gap-2 group">
+                            <div className="bg-white p-1.5 md:p-2 rounded-full border border-hav-gold/20 flex items-center justify-center shadow-xs">
+                                <ShieldAlert className="w-3.5 h-3.5 md:w-4 md:h-4 text-green-700" />
+                            </div>
+                            <div className="flex flex-col text-left">
+                                <span className="text-[9px] md:text-xs font-black uppercase tracking-widest text-green-800">No Preservatives</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_40%,rgba(0,0,0,0.3)_100%)] pointer-events-none z-20"></div>
         </section>
     );

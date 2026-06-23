@@ -19,11 +19,15 @@ export type StoreSettings = {
     background_color?: string | null;
     carousel_background_color?: string | null;
     razorpay_key_id?: string | null;
+    whatsapp_phone_number_id?: string | null;
+    whatsapp_access_token?: string | null;
+    whatsapp_template_name?: string | null;
+    whatsapp_recipient_numbers?: string | null;
 };
 
 export type StoreSettingsUpdate = Partial<Omit<StoreSettings, 'id'>>;
 
-export type Page = 'home' | 'shop' | 'product' | 'about' | 'recipes' | 'contact' | 'login' | 'signup' | 'profile' | 'checkout' | 'recipeDetail' | 'admin' | 'wishlist' | 'compare' | 'legal' | 'blog' | 'blogPost' | 'influencer' | 'sitemap' | 'social' | 'notFound';
+export type Page = 'home' | 'shop' | 'product' | 'about' | 'recipes' | 'contact' | 'login' | 'signup' | 'profile' | 'checkout' | 'cart' | 'recipeDetail' | 'admin' | 'wishlist' | 'compare' | 'legal' | 'blog' | 'blogPost' | 'influencer' | 'sitemap' | 'social' | 'notFound';
 export type PageContext = { productId?: string; recipeId?: string; category?: string; documentId?: string; blogPostSlug?: string; };
 
 export type ContactMessage = {

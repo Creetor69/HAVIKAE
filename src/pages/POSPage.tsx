@@ -120,8 +120,8 @@ const POSPage: React.FC = () => {
                     {successOrder.order_type === 'offline_delivery' && (
                         <div className="bg-hav-orange-50 p-4 rounded-xl mb-6 text-sm">
                             <p className="font-bold text-hav-orange-800 mb-2">Tracking Link for Customer:</p>
-                            <code className="block bg-white p-2 rounded border break-all">
-                                {window.location.origin}/track?id={successOrder.order_number}&m={customerInfo.mobile}
+                            <code className="block bg-white p-2 rounded border break-all text-xs font-mono select-all">
+                                {window.location.origin}/track?id={successOrder.order_number}&m={successOrder.shipping_address?.mobile || successOrder.shipping_address?.phone_number || ''}
                             </code>
                         </div>
                     )}

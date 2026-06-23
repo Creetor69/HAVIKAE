@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+
 import { 
   Search, Plus, Minus, Trash2, User, Phone, MapPin, CreditCard, 
   Truck, Calendar, Users, ShoppingBag, CheckCircle, AlertCircle, 
@@ -152,8 +153,13 @@ export default function OfflineApp() {
         const parsed = JSON.parse(saved);
         return {
           ...hardcoded,
+          phoneNumberId: parsed.phoneNumberId || hardcoded.phoneNumberId,
+          accessToken: parsed.accessToken || hardcoded.accessToken,
+          templateName: 'hav_order',
+          languageCode: parsed.languageCode || hardcoded.languageCode,
           recipientNumbers: parsed.recipientNumbers || '',
-          triggerOnNewOrder: parsed.triggerOnNewOrder ?? true
+          triggerOnNewOrder: parsed.triggerOnNewOrder ?? true,
+          supportNumber: parsed.supportNumber || hardcoded.supportNumber
         };
       }
     } catch (e) {
@@ -411,11 +417,11 @@ export default function OfflineApp() {
 
   const handleSaveCustomerDetails = async () => {
     if (!customerName.trim()) {
-      setGlobalBanner({ type: 'warning', text: "Customer Name is required to save details!" });
+      setGlobalBanner({ type: 'error', text: "Customer Name is required to save details!" });
       return;
     }
     if (!customerMobile.trim()) {
-      setGlobalBanner({ type: 'warning', text: "Customer Mobile number is required!" });
+      setGlobalBanner({ type: 'error', text: "Customer Mobile number is required!" });
       return;
     }
 
@@ -553,15 +559,15 @@ export default function OfflineApp() {
   // Submit Sale Handler
   const handleCheckout = async () => {
     if (cartItems.length === 0) {
-      setGlobalBanner({ type: 'warning', text: "Please add at least one product to the Cart!" });
+      setGlobalBanner({ type: 'error', text: "Please add at least one product to the Cart!" });
       return;
     }
     if (!customerName.trim()) {
-      setGlobalBanner({ type: 'warning', text: "Customer Name is required to place an order!" });
+      setGlobalBanner({ type: 'error', text: "Customer Name is required to place an order!" });
       return;
     }
     if (!customerMobile.trim()) {
-      setGlobalBanner({ type: 'warning', text: "Customer Mobile number is required!" });
+      setGlobalBanner({ type: 'error', text: "Customer Mobile number is required!" });
       return;
     }
 
@@ -822,10 +828,9 @@ export default function OfflineApp() {
       return `✨ *${item.quantity}x ${item.name} (${item.net_weight})*\n   🔗 www.havikar.com/products/${slug}`;
     }).join('\n\n');
 
-    // Build plain-text items summary with URLs for the template parameter {{3}}
+    // Build plain-text items summary with net weight for the template parameter {{3}}
     const itemsSummarySimple = order.items.map(item => {
-      const slug = item.name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-');
-      return `${item.quantity}x ${item.name} (www.havikar.com/products/${slug})`;
+      return `${item.quantity}x ${item.name}${item.net_weight ? ` (${item.net_weight})` : ''}`;
     }).join(', ');
     
     // Check if it's delivery-based to output "Order Placed" vs "Taken in Store"
@@ -836,7 +841,39 @@ export default function OfflineApp() {
       ? "Paid securely! 💳 Thank you"
       : `Payment due: ₹${order.balance_due}`;
 
-    const messageText = `Hello ${order.customer_name},\n\nThank you for shopping with Havikar! 🌸 Your order has been successfully placed.\n\n• Order Reference: #${order.id.split('-')[1].toUpperCase()}\n• Total Bill Amount: ₹${order.total}\n• Payment Status: ${displayPaymentStatus}\n\nWe appreciate your association. Have a delicious and wholesome day!`;
+    const messageText = `Namaskara ${order.customer_name},
+
+Thank you for choosing Havikar.
+
+Your order details have been successfully recorded, and we're delighted to serve you with our traditional and wholesome products.
+
+🛍️ Products
+${itemsFormatted}
+
+🧾 Order ID
+#${order.id.split('-')[1].toUpperCase()}
+
+💰 Total Amount
+₹${order.total}
+
+💳 Payment Status
+${displayPaymentStatus}
+
+📦 Order Status
+${displayFulfillment}
+
+Every Havikar product is crafted with care using quality ingredients and time-honoured recipes, bringing authentic flavours and goodness to your home.
+
+As a token of our appreciation, enjoy 10% OFF on your next order above ₹999 with code:
+
+🎁 HAVIKAR10
+
+Visit www.havikar.com to explore our full range of traditional foods, healthy snacks, handcrafted blends, pickles, oils, honey, and more.
+
+We look forward to serving you again soon.
+
+With gratitude,
+Team Havikar`;
 
     if (whatsappConfig.mode === 'browser') {
       const encodedText = encodeURIComponent(messageText);
@@ -857,63 +894,113 @@ export default function OfflineApp() {
         return;
       }
 
-      // Format standard or template call
-      const isHelloWorld = whatsappConfig.templateName.trim() === 'hello_world';
-      let payload: any = {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: mobileSanitized.startsWith('91') || mobileSanitized.length > 10 ? mobileSanitized : '91' + mobileSanitized,
-        type: "template",
-        template: {
-          name: whatsappConfig.templateName.trim(),
-          language: {
-            code: whatsappConfig.languageCode.trim() || "en"
-          }
+      const cleanAndFormatMobile = (num: string) => {
+        let sanitized = num.replace(/\D/g, '');
+        if (sanitized.startsWith('0')) {
+          sanitized = sanitized.substring(1);
         }
+        if (sanitized.length < 10) return null;
+        if (sanitized.startsWith('91') && sanitized.length === 12) {
+          return sanitized;
+        }
+        if (sanitized.length === 10) {
+          return '91' + sanitized;
+        }
+        return sanitized;
       };
 
-      // Add template components mapping the 4 ordered Meta template variables
-      if (!isHelloWorld) {
-        payload.template.components = [
-          {
-            type: "body",
-            parameters: [
-              { type: "text", text: order.customer_name }, // {{1}} - Customer Name
-              { type: "text", text: order.id.split('-')[1].toUpperCase() }, // {{2}} - Order Number
-              { type: "text", text: `₹${order.total}` }, // {{3}} - Total Bill Amount
-              { type: "text", text: displayPaymentStatus } // {{4}} - Payment Status
-            ]
-          }
-        ];
+      const targetNumbers: string[] = [];
+      const customerNum = cleanAndFormatMobile(mobileSanitized);
+      if (customerNum) {
+        targetNumbers.push(customerNum);
       }
+
+      const configuredAlerts = whatsappConfig.recipientNumbers
+        ? whatsappConfig.recipientNumbers.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : ['8296925577', '9845024156'];
+
+      for (const alert of configuredAlerts) {
+        const cleanAlert = cleanAndFormatMobile(alert);
+        if (cleanAlert && !targetNumbers.includes(cleanAlert)) {
+          targetNumbers.push(cleanAlert);
+        }
+      }
+
+      const adminFallback1 = cleanAndFormatMobile('8296925577');
+      const adminFallback2 = cleanAndFormatMobile('9845024156');
+      if (adminFallback1 && !targetNumbers.includes(adminFallback1)) {
+        targetNumbers.push(adminFallback1);
+      }
+      if (adminFallback2 && !targetNumbers.includes(adminFallback2)) {
+        targetNumbers.push(adminFallback2);
+      }
+
+      // Format standard or template call
+      const rawTemplateName: string = 'hav_order';
+      const templateName = rawTemplateName;
+      const isHelloWorld = templateName === 'hello_world';
 
       try {
         setLoading(true);
-        // Call our Backend CORS API proxy instead of client browser fetch
-        const res = await fetch(`/api/offline/send-whatsapp`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            phoneId,
-            token,
-            payload
-          })
-        });
+        const results = [];
+        let successCount = 0;
 
-        const data = await res.json();
-        if (res.ok) {
-          setGlobalBanner({ type: 'success', text: `WhatsApp Cloud API sent message to ${order.customer_name} successfully!` });
+        for (const recipient of targetNumbers) {
+          let payload: any = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: recipient,
+            type: "template",
+            template: {
+              name: templateName,
+              language: {
+                code: whatsappConfig.languageCode.trim() || "en"
+              }
+            }
+          };
+
+          // Add template components mapping the 6 ordered Meta template variables
+          if (!isHelloWorld) {
+            payload.template.components = [
+              {
+                type: "body",
+                parameters: [
+                  { type: "text", text: order.customer_name }, // {{1}} - Customer Name
+                  { type: "text", text: order.id.split('-')[1].toUpperCase() }, // {{2}} - Order Number
+                  { type: "text", text: itemsSummarySimple.slice(0, 1020) }, // {{3}} - Products Details
+                  { type: "text", text: `₹${order.total}` }, // {{4}} - Total Bill Amount
+                  { type: "text", text: displayPaymentStatus }, // {{5}} - Payment Status
+                  { type: "text", text: displayFulfillment } // {{6}} - Order/Fulfillment Status
+                ]
+              }
+            ];
+          }
+
+          // Dispatch directly to Meta Graph API natively!
+          const res = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await res.json();
+          if (res.ok) {
+            successCount++;
+          }
+          results.push({ recipient, success: res.ok, data });
+        }
+
+        if (successCount > 0) {
+          setGlobalBanner({ type: 'success', text: `WhatsApp Cloud API successfully sent message to ${successCount} recipients (including customer & admins)!` });
         } else {
-          console.error("Meta WhatsApp Proxy Error:", data);
+          console.error("Meta WhatsApp Proxy Error details:", results);
           setGlobalBanner({ 
             type: 'error', 
-            text: `WhatsApp API Error: ${data?.error?.message || 'Unknown network error. Check console.'}` 
+            text: `WhatsApp API Error: Failed to send to any of the recipients.` 
           });
-          if (manualTrigger) {
-            setShowWhatsappSettings(true);
-          }
         }
       } catch (err: any) {
         setGlobalBanner({ type: 'error', text: `Failed to invoke Meta WhatsApp URL: ${err.message}` });
@@ -3320,14 +3407,16 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                           try {
                             setLoading(true);
 
-                            const isHelloWorld = (whatsappConfig.templateName || "hello_world").trim() === 'hello_world';
+                            const rawTemplateName: string = "hav_order";
+                            const templateName = rawTemplateName;
+                            const isHelloWorld = templateName === 'hello_world';
                             let payload: any = {
                               messaging_product: "whatsapp",
                               recipient_type: "individual",
                               to: tester.startsWith('91') || tester.length > 10 ? tester : '91' + tester,
                               type: "template",
                               template: {
-                                name: (whatsappConfig.templateName || "hello_world").trim(),
+                                name: templateName,
                                 language: { code: (whatsappConfig.languageCode || "en").trim() }
                               }
                             };
@@ -3338,24 +3427,23 @@ CREATE POLICY "Allow public read/write offline orders" ON offline_orders FOR ALL
                                   parameters: [
                                     { type: "text", text: "Verified Tester" }, // {{1}} - Customer Name
                                     { type: "text", text: "SANDBOX123" }, // {{2}} - Order Number
-                                    { type: "text", text: "₹999" }, // {{3}} - Total Bill Amount
-                                    { type: "text", text: "Paid securely! 💳 Thank you" } // {{4}} - Payment Status
+                                    { type: "text", text: "1x Traditional South Indian Foods (Sample)" }, // {{3}} - Products Details
+                                    { type: "text", text: "₹999" }, // {{4}} - Total Bill Amount
+                                    { type: "text", text: "Paid securely! 💳 Thank you" }, // {{5}} - Payment Status
+                                    { type: "text", text: "Packed & Ready for Dispatch" } // {{6}} - Order Status
                                   ]
                                 }
                               ];
                             }
 
                             // Call backend API proxy to completely bypass browser CORS block
-                            const res = await fetch(`/api/offline/send-whatsapp`, {
+                            const res = await fetch(`https://graph.facebook.com/v21.0/${whatsappConfig.phoneNumberId}/messages`, {
                               method: 'POST',
                               headers: {
-                                'Content-Type': 'application/json'
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${whatsappConfig.accessToken}`
                               },
-                              body: JSON.stringify({
-                                phoneId: whatsappConfig.phoneNumberId,
-                                token: whatsappConfig.accessToken,
-                                payload
-                              })
+                              body: JSON.stringify(payload)
                             });
 
                             const data = await res.json();

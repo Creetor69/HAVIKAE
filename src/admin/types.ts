@@ -17,8 +17,15 @@ export type StoreSettings = {
     carousel_theme?: 'green' | 'beige' | null;
     background_color?: string | null;
     carousel_background_color?: string | null;
+    is_banner_carousel_enabled?: boolean | null;
+    global_banner_duration?: number | null;
     email?: string | null;
     mobile?: string | null;
+    razorpay_key_id?: string | null;
+    whatsapp_phone_number_id?: string | null;
+    whatsapp_access_token?: string | null;
+    whatsapp_template_name?: string | null;
+    whatsapp_recipient_numbers?: string | null;
 };
 
 export type StoreSettingsUpdate = Partial<Omit<StoreSettings, 'id'>>;

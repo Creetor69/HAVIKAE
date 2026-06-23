@@ -2,6 +2,7 @@
 import React from 'react';
 import { Order } from '../types';
 import CheckCircleIcon from './icons/CheckCircleIcon';
+import { getDeliveryEstimate } from '../utils/delivery';
 
 interface OrderSuccessModalProps {
   order: Order;
@@ -40,6 +41,18 @@ const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({ order, onContinue
             ))}
           </div>
           <div className="border-t border-hav-orange-200 my-3"></div>
+          {order.shipping_address && (
+            <>
+              <div className="bg-[#0F4A3C]/5 border border-[#0F4A3C]/10 rounded-xl p-2.5 mb-3 flex items-center gap-2">
+                <span className="text-xl">🚚</span>
+                <div className="text-left text-xs text-hav-brown">
+                  <p className="font-extrabold text-[#0F4A3C] uppercase tracking-wider text-[9px]">Estimated Speed Post Transit</p>
+                  <p className="font-extrabold text-[#0F4A3C] text-[13px]">{getDeliveryEstimate(order.shipping_address.state || '', order.shipping_address.city || '')}</p>
+                </div>
+              </div>
+              <div className="border-t border-hav-orange-200 my-3"></div>
+            </>
+          )}
           <p className="flex justify-between font-bold text-hav-brown text-lg">
             <span>Total Paid:</span>
             <span>₹{(order.total ?? 0).toFixed(2)}</span>

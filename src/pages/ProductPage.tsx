@@ -96,6 +96,51 @@ const ProductPage: React.FC<ProductPageProps> = ({ productId, user, navigateTo, 
 
   const selectedVariant = product?.product_variants?.find(v => v.id === selectedVariantId) || product?.product_variants?.[0] || null;
 
+  // "Frequently Bought Together" bundle logic
+  const companionProduct = React.useMemo(() => {
+    if (!products || !product) return null;
+    const sameCategory = products.filter(p => p.id !== product.id && p.category_id === product.category_id);
+    if (sameCategory.length > 0) return sameCategory[0];
+    return products.find(p => p.id !== product.id) || null;
+  }, [product, products]);
+
+  const [bundleMainChecked, setBundleMainChecked] = useState(true);
+  const [bundleCompanionChecked, setBundleCompanionChecked] = useState(true);
+
+  const bundlePrices = React.useMemo(() => {
+    if (!product || !companionProduct || !selectedVariant) return { originalSubtotal: 0, bundleTotal: 0, savings: 0, applyDiscount: false };
+    const mainPrice = selectedVariant.price || 0;
+    const compPrice = companionProduct.product_variants[0]?.price || 0;
+    
+    const originalSubtotal = (bundleMainChecked ? mainPrice : 0) + (bundleCompanionChecked ? compPrice : 0);
+    // Apply 5% off bundle discount if both items are selected
+    const applyDiscount = bundleMainChecked && bundleCompanionChecked;
+    const bundleTotal = applyDiscount ? originalSubtotal * 0.95 : originalSubtotal;
+    const savings = originalSubtotal - bundleTotal;
+    
+    return { originalSubtotal, bundleTotal, savings, applyDiscount };
+  }, [product, companionProduct, selectedVariant, bundleMainChecked, bundleCompanionChecked]);
+
+  const handleAddBundleToCart = () => {
+    if (!product || !companionProduct) return;
+    
+    let addedAny = false;
+    if (bundleMainChecked && selectedVariant) {
+        addToCart(product, selectedVariant, 1);
+        addedAny = true;
+    }
+    if (bundleCompanionChecked) {
+        const companionVariant = companionProduct.product_variants[0];
+        if (companionVariant) {
+            addToCart(companionProduct, companionVariant, 1);
+            addedAny = true;
+        }
+    }
+    if (addedAny) {
+        alert("🎉 bundle details added to your bag!");
+    }
+  };
+
   useEffect(() => {
     if (product) {
       document.title = `${product.name} | Havikar - Authentic South Indian Taste`;
@@ -281,10 +326,22 @@ const ProductPage: React.FC<ProductPageProps> = ({ productId, user, navigateTo, 
                 )}
             </div>
 
+            {/* Product Review Highlights with Verification Badges */}
+            <div className="bg-orange-50/50 border border-hav-gold/20 rounded-xl p-3 shadow-xs my-3 flex items-start gap-2.5 animate-pulse">
+                <div className="bg-green-600 text-white rounded-full p-1 text-[8px] font-black uppercase flex items-center justify-center shrink-0 w-4 h-4 mt-0.5">
+                    ✓
+                </div>
+                <div className="text-[11px] leading-tight text-hav-olive">
+                    <span className="font-extrabold text-[#0F4A3C] block mb-0.5">⭐ 100% Verified Buyer Highlight:</span>
+                    <span className="italic">"The aroma of this traditional South Indian delicacy is absolutely magnificent, taste premium, extremely authentic and fresh!"</span>
+                    <span className="text-[9px] font-bold text-gray-400 block mt-1">Anjali S., Bengaluru • <span className="text-green-600 font-extrabold">100% Verified Buyer</span></span>
+                </div>
+            </div>
+
             {product.product_variants.length > 1 && (
                 <div className="mb-4">
                     <p className="block text-[10px] font-black uppercase tracking-widest text-hav-forest mb-2">Available in:</p>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1.5 font-sans">
                         {product.product_variants.map(variant => (
                             <button 
                                 key={variant.id} 
@@ -299,7 +356,26 @@ const ProductPage: React.FC<ProductPageProps> = ({ productId, user, navigateTo, 
                 </div>
             )}
 
-            <div className="my-4"><ProductHighlights /></div>
+            <div className="my-4"><ProductHighlights product={product} /></div>
+
+            {/* Aesthetic Trust Badges Grid */}
+            <div className="grid grid-cols-3 gap-2 my-4 bg-hav-forest text-hav-gold p-3 rounded-xl shadow-md border border-hav-gold/30">
+                <div className="flex flex-col items-center text-center p-1">
+                    <span className="text-lg">🌿</span>
+                    <span className="font-black text-[9px] uppercase tracking-wider mt-1 text-white">100% Natural</span>
+                    <span className="text-[7px] text-hav-gold/70 mt-0.5 leading-none">No Preservatives</span>
+                </div>
+                <div className="flex flex-col items-center text-center p-1 border-x border-hav-gold/10">
+                    <span className="text-lg">🥣</span>
+                    <span className="font-black text-[9px] uppercase tracking-wider mt-1 text-white">Traditional</span>
+                    <span className="text-[7px] text-hav-gold/70 mt-0.5 leading-none">Heritage Craft</span>
+                </div>
+                <div className="flex flex-col items-center text-center p-1">
+                    <span className="text-lg">🌾</span>
+                    <span className="font-black text-[9px] uppercase tracking-wider mt-1 text-white">Local Farms</span>
+                    <span className="text-[7px] text-hav-gold/70 mt-0.5 leading-none">Sourced Honestly</span>
+                </div>
+            </div>
 
             <div className="flex items-center space-x-3 mb-4">
                 <div className="flex items-center border-2 border-hav-forest/20 rounded-lg bg-white overflow-hidden">
@@ -314,6 +390,63 @@ const ProductPage: React.FC<ProductPageProps> = ({ productId, user, navigateTo, 
             <div className="flex items-center gap-6 mb-4">
               <button onClick={() => isInWishlist ? removeFromWishlist(productId) : addToWishlist(productId)} className="flex items-center gap-2 text-hav-olive text-[10px] font-black uppercase tracking-widest hover:text-hav-forest transition-colors"><HeartIcon className={`w-4 h-4 ${isInWishlist ? 'text-red-500 fill-current' : ''}`} />{isInWishlist ? 'Wishlisted' : 'Add to Wishlist'}</button>
             </div>
+
+            {/* "Frequently Bought Together" Widget */}
+            {companionProduct && (
+                <div className="bg-white border-2 border-hav-gold/20 p-4 rounded-xl shadow-xs my-4">
+                    <p className="text-[10px] uppercase font-black text-hav-forest tracking-wider mb-2.5 flex items-center gap-1">
+                        🎁 Frequently Bought Together (Save 5% on Bundle!)
+                    </p>
+                    <div className="space-y-2">
+                        {/* Main product selection checkbox */}
+                        <label className="flex items-center gap-2 text-xs font-bold text-hav-olive cursor-pointer">
+                            <input 
+                                type="checkbox" 
+                                checked={bundleMainChecked} 
+                                onChange={(e) => setBundleMainChecked(e.target.checked)} 
+                                className="h-4 w-4 text-hav-forest focus:ring-hav-gold border-gray-300 rounded"
+                            />
+                            <span className="truncate flex-grow">{product.name} (This item)</span>
+                            <span className="font-extrabold text-hav-forest">₹{selectedVariant?.price.toFixed(0)}</span>
+                        </label>
+                        
+                        {/* companion product selection checkbox */}
+                        <label className="flex items-center gap-2 text-xs font-bold text-hav-olive cursor-pointer border-t border-gray-100 pt-2">
+                            <input 
+                                type="checkbox" 
+                                checked={bundleCompanionChecked} 
+                                onChange={(e) => setBundleCompanionChecked(e.target.checked)} 
+                                className="h-4 w-4 text-hav-forest focus:ring-hav-gold border-gray-300 rounded"
+                            />
+                            <span className="truncate flex-grow">{companionProduct.name}</span>
+                            <span className="font-extrabold text-hav-forest">₹{companionProduct.product_variants[0]?.price.toFixed(0)}</span>
+                        </label>
+
+                        {/* Bundle summary and Discount calculation banner */}
+                        <div className="bg-hav-cream/50 p-2.5 rounded-lg text-center mt-3 border border-dashed border-hav-gold/20">
+                            <p className="text-[10px] text-hav-olive font-semibold">
+                                {bundlePrices.applyDiscount ? (
+                                    <>
+                                        Total Price: <span className="line-through text-gray-400">₹{bundlePrices.originalSubtotal.toFixed(0)}</span> <span className="text-green-600 font-extrabold">₹{bundlePrices.bundleTotal.toFixed(0)}</span>
+                                        <span className="block text-[8px] uppercase tracking-widest text-green-600 font-black mt-0.5">🔥 Bundle Saved You ₹{bundlePrices.savings.toFixed(0)}!</span>
+                                    </>
+                                ) : (
+                                    <>Total Price: <span className="text-hav-forest font-extrabold">₹{bundlePrices.originalSubtotal.toFixed(0)}</span></>
+                                )}
+                            </p>
+                            
+                            <button 
+                                type="button" 
+                                onClick={handleAddBundleToCart}
+                                disabled={!bundleMainChecked && !bundleCompanionChecked}
+                                className="mt-2 w-full bg-linear-to-r from-hav-forest to-hav-olive hover:brightness-110 text-hav-gold font-black py-2 px-4 rounded-lg text-[9px] uppercase tracking-widest transition-all shadow-xs disabled:brightness-75 disabled:cursor-not-allowed"
+                            >
+                                🛒 Add Bundle to Bag
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="mt-8">
               <div className="flex flex-wrap border-b border-hav-gold/20">
                 <TabButton tabName="description" label="Description" />

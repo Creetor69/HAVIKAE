@@ -78,7 +78,13 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ navigateTo, product
   const [startIndex, setStartIndex] = useState(0);
   const productsPerPage = 4;
   
-  const categories = ['All', ...new Set(products.map(p => p.categories?.name).filter(Boolean))];
+  const categories: string[] = ['All'];
+  products.forEach(p => {
+    const catName = p.categories?.name;
+    if (catName && !categories.includes(String(catName))) {
+      categories.push(String(catName));
+    }
+  });
   
   const filteredProducts = selectedCategory === 'All' 
     ? products 

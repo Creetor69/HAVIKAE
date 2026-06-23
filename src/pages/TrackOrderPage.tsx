@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Order } from '../types';
 import { Search, Package, Truck, CheckCircle, Clock, MapPin, Phone, User, ExternalLink } from 'lucide-react';
+import { getDeliveryEstimate } from '../utils/delivery';
 
 const TrackOrderPage: React.FC = () => {
     const [orderId, setOrderId] = useState('');
@@ -37,9 +38,15 @@ const TrackOrderPage: React.FC = () => {
 
             if (error || !data) throw new Error("Order not found");
 
-            // Verify mobile number matches
-            const shippingMobile = data.shipping_address?.mobile || data.shipping_address?.phone_number;
-            if (shippingMobile !== searchMobile) {
+            // Verify mobile number matches (compare the last 10 digits to bypass spaces, country codes, +91 etc.)
+            const cleanNumber = (num: string) => {
+                const digits = num.replace(/\D/g, '');
+                return digits.length >= 10 ? digits.slice(-10) : digits;
+            };
+            const shippingMobile = cleanNumber(data.shipping_address?.mobile || data.shipping_address?.phone_number || '');
+            const inputMobile = cleanNumber(searchMobile);
+            
+            if (!shippingMobile || !inputMobile || shippingMobile !== inputMobile) {
                 throw new Error("Mobile number does not match this order");
             }
 
@@ -121,6 +128,20 @@ const TrackOrderPage: React.FC = () => {
                                     </span>
                                 </div>
                             </div>
+
+                            {/* Delivery Estimate */}
+                            {order.status !== 'Delivered' && order.shipping_address && (
+                                <div className="bg-[#0F4A3C]/5 border border-[#0F4A3C]/10 p-5 rounded-2xl mb-8 flex items-center gap-4">
+                                    <div className="bg-[#0F4A3C] text-hav-gold p-3 rounded-xl text-xl shrink-0">🚚</div>
+                                    <div className="text-left text-sm text-hav-brown">
+                                        <p className="font-extrabold text-[#0F4A3C] uppercase tracking-wider text-[10px] leading-none mb-1">India Post Speed Post Transit Estimate</p>
+                                        <p className="font-black text-[#0F4A3C] text-base">
+                                            Estimated {getDeliveryEstimate(order.shipping_address.state || '', order.shipping_address.city || '')}
+                                        </p>
+                                        <p className="text-[11px] text-hav-olive mt-1">Dispatched fresh from Bangalore hub same day or next business day.</p>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Tracking Info */}
                             {order.status === 'Shipped' && order.tracking_id && (

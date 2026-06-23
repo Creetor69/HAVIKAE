@@ -2,8 +2,16 @@
 import React from 'react';
 import { MessageCircle } from 'lucide-react';
 
-const WhatsAppFloat: React.FC = () => {
-  const phoneNumber = "919876543210"; // Replace with actual number
+interface WhatsAppFloatProps {
+  whatsappNumber?: string | null;
+}
+
+const WhatsAppFloat: React.FC<WhatsAppFloatProps> = ({ whatsappNumber }) => {
+  const rawNumber = whatsappNumber || "8296925577";
+  // Clean special characters if any
+  const cleaned = rawNumber.replace(/\D/g, '');
+  const phoneNumber = cleaned.startsWith('91') || cleaned.length > 10 ? cleaned : '91' + cleaned;
+  
   const message = "Hi Havikar! I'd like to know more about your products.";
   const url = `https://wa.me/${phoneNumber}?text=${encodeURIComponent(message)}`;
 

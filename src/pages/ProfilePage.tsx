@@ -213,25 +213,6 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onLogout, updateOrderSt
     };
   }, [user]);
   
-  const handleCancelOrder = (orderId: string) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
-
-    const createdAt = new Date(order.created_at).getTime();
-    const now = new Date().getTime();
-    const diffInMinutes = (now - createdAt) / (1000 * 60);
-
-    if (diffInMinutes > 30) {
-        alert('Orders cannot be cancelled after 30 minutes of placement. Please contact support for assistance.');
-        return;
-    }
-
-    if (window.confirm('Are you sure you want to cancel this order?')) {
-        updateOrderStatus(orderId, 'Cancelled');
-        setOrders(prev => prev.map(o => o.id === orderId ? {...o, status: 'Cancelled'} : o));
-    }
-  };
-
   const handleDeleteAddress = async (addressId: string) => {
     if (window.confirm('Are you sure you want to delete this address?')) {
         const { error } = await supabase!.from('addresses').delete().eq('id', addressId);
@@ -283,23 +264,23 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onLogout, updateOrderSt
       case 'Processing': 
         return { 
           color: 'text-blue-600 bg-blue-50 border-blue-200', 
-          symbol: '🍳', 
-          label: 'Cooking...', 
-          desc: 'Our kitchen is preparing your traditional treats.' 
+          symbol: '⚙️', 
+          label: 'Processing', 
+          desc: 'Our backend is processing your order.' 
         };
       case 'Payment Received': 
         return { 
           color: 'text-purple-600 bg-purple-50 border-purple-200', 
           symbol: '💰', 
-          label: 'Paid', 
-          desc: 'Payment confirmed. Moving to the kitchen soon.' 
+          label: 'Payment Received', 
+          desc: 'Your payment was successfully received.' 
         };
       case 'Shipped': 
         return { 
           color: 'text-yellow-600 bg-yellow-50 border-yellow-200', 
           symbol: '🚚', 
-          label: 'On the Way', 
-          desc: 'Your package is out for delivery!' 
+          label: 'Shipped', 
+          desc: 'Your order has been shipped!' 
         };
       case 'Delivered': 
         return { 
@@ -412,9 +393,6 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onLogout, updateOrderSt
                                                     </div>
                                                 </div>
                                                 <div className="flex gap-2">
-                                                    {order.status === 'Processing' && (
-                                                        <button onClick={() => handleCancelOrder(order.id)} className="bg-red-500 text-white px-4 py-2 text-xs font-black uppercase tracking-widest rounded-full hover:bg-red-600 transition-colors shadow-sm">Cancel</button>
-                                                    )}
                                                     <button 
                                                         onClick={() => handleBuyAgain(order)} 
                                                         disabled={addingToCart}

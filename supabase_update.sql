@@ -139,3 +139,61 @@ CREATE POLICY "Users can update their own notifications" ON notifications
 DROP POLICY IF EXISTS "System/Admins can insert notifications" ON notifications;
 CREATE POLICY "System/Admins can insert notifications" ON notifications
     FOR INSERT TO authenticated WITH CHECK (true); -- Simplified for now, usually handled by triggers or admin
+
+-- 9. Store settings WhatsApp Cloud API Configuration columns
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_template_name TEXT;
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS whatsapp_recipient_numbers TEXT;
+
+-- 10. Promotional Content Table and Permissions
+CREATE TABLE IF NOT EXISTS promotional_content (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    type TEXT NOT NULL CHECK (type IN ('image_carousel', 'text_carousel')),
+    is_active BOOLEAN DEFAULT TRUE,
+    sort_order INT DEFAULT 0,
+    layout_style TEXT CHECK (layout_style IN ('side_by_side', 'full_banner', NULL)),
+    image_url TEXT,
+    title TEXT,
+    subtitle TEXT,
+    text TEXT,
+    button_text TEXT,
+    button_link_page TEXT,
+    button_link_context JSONB DEFAULT '{}'::jsonb,
+    carousel_duration_seconds INT DEFAULT 7,
+    color_scheme TEXT CHECK (color_scheme IN ('green', 'beige', NULL))
+);
+
+-- Enable RLS
+ALTER TABLE promotional_content ENABLE ROW LEVEL SECURITY;
+
+-- Select policies (Allow everyone to view active slides)
+DROP POLICY IF EXISTS "Anyone can view active promotional content" ON promotional_content;
+CREATE POLICY "Anyone can view active promotional content" ON promotional_content
+    FOR SELECT USING (is_active = true);
+
+-- Select policies for Admins (Allow viewing all template banners)
+DROP POLICY IF EXISTS "Admins can view all promotional content" ON promotional_content;
+CREATE POLICY "Admins can view all promotional content" ON promotional_content
+    FOR SELECT TO authenticated 
+    USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+
+-- Admin insert, update, delete permissions
+DROP POLICY IF EXISTS "Admins can insert promotional content" ON promotional_content;
+CREATE POLICY "Admins can insert promotional content" ON promotional_content
+    FOR INSERT TO authenticated 
+    WITH CHECK (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+
+DROP POLICY IF EXISTS "Admins can update promotional content" ON promotional_content;
+CREATE POLICY "Admins can update promotional content" ON promotional_content
+    FOR UPDATE TO authenticated 
+    USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+
+DROP POLICY IF EXISTS "Admins can delete promotional content" ON promotional_content;
+CREATE POLICY "Admins can delete promotional content" ON promotional_content
+    FOR DELETE TO authenticated 
+    USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = true));
+
+-- Create helpful indexes for performance
+CREATE INDEX IF NOT EXISTS idx_promotional_content_sort ON promotional_content(sort_order);

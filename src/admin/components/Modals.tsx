@@ -1,5 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
 import { 
     Product, ProductUpdate, Category, ProductVariant, Coupon, CouponInsert, 
     CouponUpdate, SaleBanner, LegalDocument, LegalDocumentUpdate, ProductCombo, 
@@ -9,10 +10,192 @@ import {
     AboutSection, AboutSectionInsert, AboutSectionUpdate, OrderUpdate
 } from '../types';
 import { XIcon } from './Icons';
+import { motion } from 'framer-motion';
 
 const modalInputStyles = "mt-1 block w-full border border-hav-orange-200 rounded-md shadow-sm py-2.5 px-4 bg-hav-cream text-hav-brown placeholder:text-hav-brown/60 focus:outline-none focus:ring-2 focus:ring-hav-gold/50 focus:border-hav-forest transition-all text-sm";
 const whiteInputStyles = "mt-1 block w-full border border-hav-orange-200 rounded-md shadow-sm py-2.5 px-4 bg-white text-hav-brown placeholder:text-hav-brown/60 focus:outline-none focus:ring-2 focus:ring-hav-gold/50 focus:border-hav-forest transition-all text-sm";
 const primaryButtonStyles = "bg-hav-forest text-hav-gold hover:bg-hav-forest/90 hover:shadow-2xl border border-hav-gold/20 font-black py-3 px-8 rounded-full transition-all duration-300 uppercase tracking-widest text-sm";
+
+interface ProductImageManagerProps {
+    imageUrls: string[];
+    onChange: (urls: string[]) => void;
+}
+
+export const ProductImageManager: React.FC<ProductImageManagerProps> = ({ imageUrls, onChange }) => {
+    const [newUrl, setNewUrl] = useState('');
+    const [uploading, setUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const safeUrls = useMemo(() => Array.isArray(imageUrls) ? imageUrls : [], [imageUrls]);
+
+    const handleAddUrl = () => {
+        const trimmed = newUrl.trim();
+        if (!trimmed) return;
+        if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://') && !trimmed.startsWith('/')) {
+            alert('Please enter a valid image URL starting with http://, https:// or /');
+            return;
+        }
+        onChange([...safeUrls, trimmed]);
+        setNewUrl('');
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            alert('Please select a valid image file.');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+            const filePath = `product-images/${fileName}`;
+
+            const { error: uploadError } = await supabase.storage.from('media').upload(filePath, file);
+            if (uploadError) {
+                throw uploadError;
+            }
+
+            const { data } = supabase.storage.from('media').getPublicUrl(filePath);
+            if (data?.publicUrl) {
+                onChange([...safeUrls, data.publicUrl]);
+            } else {
+                alert('Uploaded successfully, but failed to fetch public URL.');
+            }
+        } catch (error: any) {
+            console.error('Error uploading product image:', error);
+            alert(`Upload failed: ${error.message || error}`);
+        } finally {
+            setUploading(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    const handleRemoveUrl = (indexToRemove: number) => {
+        onChange(safeUrls.filter((_, idx) => idx !== indexToRemove));
+    };
+
+    const handleSetCoverImage = (index: number) => {
+        if (index === 0) return; // Already cover
+        const updated = [...safeUrls];
+        const [target] = updated.splice(index, 1);
+        updated.unshift(target);
+        onChange(updated);
+    };
+
+    return (
+        <div id="product-images-manager" className="space-y-4">
+            {/* Gallery Grid */}
+            {safeUrls.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-hav-cream/20 p-4 rounded-xl border border-hav-orange-100">
+                    {safeUrls.map((url, idx) => (
+                        <div key={idx} className="relative group rounded-lg overflow-hidden border border-hav-orange-200 bg-white aspect-square flex flex-col justify-between">
+                            <img 
+                                src={url} 
+                                alt={`Product ${idx}`} 
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                            />
+                            {/* Badges / Hover Overlay */}
+                            <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+                                <div className="flex justify-between items-start">
+                                    {idx === 0 ? (
+                                        <span className="bg-hav-gold text-hav-forest text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md shadow-sm">
+                                            ★ Cover
+                                        </span>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSetCoverImage(idx)}
+                                            className="bg-white/95 hover:bg-white text-hav-forest text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md shadow-sm transition-all hover:scale-105"
+                                        >
+                                            Cover
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => handleRemoveUrl(idx)}
+                                        className="bg-red-600 hover:bg-red-700 text-white rounded-full p-1 transition-colors shadow-md"
+                                        title="Delete Image"
+                                    >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-16v1M10 3h4m-6 3h12" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <span className="text-[7px] text-zinc-350 font-mono truncate max-w-full">
+                                    {url.substring(url.lastIndexOf('/') + 1)}
+                                </span>
+                            </div>
+
+                            {/* Default Static indicator */}
+                            {idx === 0 && (
+                                <div className="absolute bottom-1.5 left-1.5 pointer-events-none">
+                                    <span className="bg-hav-forest text-hav-gold font-bold text-[7px] uppercase px-1 py-0.5 rounded-md shadow">
+                                        Cover
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div className="text-center py-6 border-2 border-dashed border-hav-orange-200/50 rounded-xl bg-hav-cream/10">
+                    <p className="text-xs text-hav-brown/60 italic">No product images added yet. Add URLs or upload below.</p>
+                </div>
+            )}
+
+            {/* Upload Button + Add URL controls */}
+            <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-2">
+                    <input 
+                        type="text" 
+                        value={newUrl} 
+                        onChange={e => setNewUrl(e.target.value)} 
+                        placeholder="Paste image URL (e.g. https://...)" 
+                        className="flex-1 min-w-0 border border-hav-orange-200 rounded-lg py-2 px-3 bg-hav-cream/30 text-xs text-hav-brown placeholder:text-hav-brown/40 outline-none focus:ring-1 focus:ring-hav-gold/50"
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUrl(); } }}
+                    />
+                    <button
+                        type="button"
+                        onClick={handleAddUrl}
+                        className="bg-hav-forest text-hav-gold hover:bg-hav-forest/90 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition-all whitespace-nowrap"
+                    >
+                        Add URL
+                    </button>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <input 
+                            type="file" 
+                            accept="image/*"
+                            ref={fileInputRef}
+                            onChange={handleFileUpload}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            style={{ display: uploading ? 'none' : 'block' }}
+                        />
+                        <button
+                            type="button"
+                            disabled={uploading}
+                            className="bg-hav-gold text-hav-forest hover:brightness-105 font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition-all inline-flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                        >
+                            {uploading ? "Uploading..." : "📤 Upload image"}
+                        </button>
+                    </div>
+                    <span className="text-[10px] text-hav-brown/60">
+                        Supports standard formats. Uploads to Supabase Cloud storage.
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export const EditProductModal: React.FC<{
     product: Product; products: Product[]; onClose: () => void;
@@ -92,6 +275,11 @@ export const EditProductModal: React.FC<{
                             <input value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})} className={modalInputStyles} placeholder="Product Name" />
                             <input value={formData.tagline || ''} onChange={e => setFormData({...formData, tagline: e.target.value})} className={modalInputStyles} placeholder="Tagline" />
                             <textarea rows={4} value={formData.description || ''} onChange={e => setFormData({...formData, description: e.target.value})} className={modalInputStyles} placeholder="Description" />
+                        </section>
+
+                        <section className="space-y-4">
+                            <h4 className="text-[10px] font-black uppercase tracking-widest text-hav-gold">Product Images (URLs & Upload)</h4>
+                            <ProductImageManager imageUrls={formData.image_urls || []} onChange={(urls) => setFormData({...formData, image_urls: urls})} />
                         </section>
 
                         <section className="space-y-4">
@@ -198,10 +386,11 @@ export const EditProductModal: React.FC<{
                                     </select>
                                 </div>
                             </div>
-                            <div className="flex gap-6 py-2">
+                            <div className="flex flex-wrap gap-6 py-2">
                                 <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={formData.is_vegan} onChange={e => setFormData({...formData, is_vegan: e.target.checked})} className="w-5 h-5 accent-hav-forest"/><span className="text-xs font-black text-hav-forest uppercase">Vegan</span></label>
                                 <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={formData.is_sponsored} onChange={e => setFormData({...formData, is_sponsored: e.target.checked})} className="w-5 h-5 accent-hav-forest"/><span className="text-xs font-black text-hav-forest uppercase">Staff Pick</span></label>
                                 <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={formData.is_active} onChange={e => setFormData({...formData, is_active: e.target.checked})} className="w-5 h-5 accent-hav-forest"/><span className="text-xs font-black text-hav-forest uppercase">Active</span></label>
+                                <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={formData.is_bestseller} onChange={e => setFormData({...formData, is_bestseller: e.target.checked})} className="w-5 h-5 accent-hav-forest"/><span className="text-xs font-black text-hav-forest uppercase">Bestseller</span></label>
                             </div>
                             <textarea value={formData.ingredients?.join(', ') || ''} onChange={e => setFormData({...formData, ingredients: e.target.value.split(',').map(s => s.trim())})} className={modalInputStyles} placeholder="Ingredients (comma separated)" rows={3} />
                         </section>
@@ -291,7 +480,7 @@ export const CouponModal: React.FC<{
                                     <input type="number" value={formData.min_order_count || 0} onChange={e => setFormData({...formData, min_order_count: Number(e.target.value) || 0})} className={whiteInputStyles} />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-[9px] font-black uppercase text-hav-gold">Min Prev Total Spend ₹</label>
+                                    <label className="text-[9px] font-black uppercase text-hav-gold">Min Prev Total Amount ₹</label>
                                     <input type="number" value={formData.min_order_value_for_history || ''} onChange={e => setFormData({...formData, min_order_value_for_history: Number(e.target.value) || null})} className={whiteInputStyles} />
                                 </div>
                             </div>
@@ -429,31 +618,410 @@ export const PromoContentModal: React.FC<{
     onSave: (data: PromotionalContentInsert | PromotionalContentUpdate, id?: string) => Promise<boolean>;
     products: Product[]; categories: Category[]; recipes: Recipe[]; blogPosts: BlogPost[];
 }> = ({ content, onClose, onSave, products, categories, recipes, blogPosts }) => {
-    const [formData, setFormData] = useState<PromotionalContentInsert | PromotionalContentUpdate>(content || {
-        type: 'image_carousel', is_active: true, sort_order: 0, layout_style: 'full_banner',
-        title: '', subtitle: '', text: '', image_url: '', button_text: '', button_link_page: '', 
-        button_link_context: null, carousel_duration_seconds: 7, color_scheme: 'green'
+    const [formData, setFormData] = useState<PromotionalContentInsert & { text_alignment?: 'left' | 'center' | 'right'; overlay_opacity?: number }>(() => {
+        const base = (content || {
+            type: 'image_carousel', is_active: true, sort_order: 0, layout_style: 'full_banner',
+            title: '', subtitle: '', text: '', image_url: '', button_text: '', button_link_page: '', 
+            button_link_context: null, carousel_duration_seconds: 7, color_scheme: 'green'
+        }) as any;
+        return {
+            ...base,
+            text_alignment: base.text_alignment || 'left',
+            overlay_opacity: base.overlay_opacity !== undefined ? base.overlay_opacity : 20
+        };
     });
 
+    const previewContainerRef = useRef<HTMLDivElement>(null);
+    const contextObj = formData.button_link_context || {};
+    const buttonX = contextObj.button_x !== undefined ? contextObj.button_x : 50;
+    const buttonY = contextObj.button_y !== undefined ? contextObj.button_y : 80;
+
+    // Load & manage Infinite Shelf local storage configuration inside the banner modal
+    const [shelfConfig, setShelfConfig] = useState(() => {
+        try {
+            const saved = localStorage.getItem('hav_infinite_shelf_config');
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        } catch (e) {}
+        return {
+            isActive: true,
+            line1: "Eat traditional.",
+            line2: "Live Better.",
+            underlineText: "Live Better.",
+            btn1Text: "Order Today!",
+            btn1Page: "shop",
+            btn1ExternalUrl: "",
+            btn2Text: "Explore Bundles",
+            btn2Page: "combos",
+            btn2ExternalUrl: ""
+        };
+    });
+
+    const handleSaveShelfConfig = () => {
+        try {
+            localStorage.setItem('hav_infinite_shelf_config', JSON.stringify(shelfConfig));
+            // Trigger storage event so client pages receive updates instantly
+            window.dispatchEvent(new Event('storage'));
+            alert("Infinite Moving Shelf configuration saved & synced perfectly!");
+        } catch (e: any) {
+            alert("Error saving: " + e.message);
+        }
+    };
+
+    const handleSaveBanner = async () => {
+        const success = await onSave(formData, content?.id);
+        if (success) {
+            onClose();
+        }
+    };
+
     return (
-        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 backdrop-blur-md">
-            <div className="bg-white p-10 rounded-[3rem] shadow-2xl w-full max-w-2xl border border-hav-gold/20 flex flex-col h-[90vh]">
-                <div className="flex justify-between items-center mb-8 flex-shrink-0"><h3 className="text-3xl font-serif font-black text-hav-forest">Banner & Promo Designer</h3><button onClick={onClose}><XIcon className="w-8 h-8"/></button></div>
-                <div className="space-y-6 overflow-y-auto pr-4 flex-grow custom-scrollbar">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Type</label><select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})} className={modalInputStyles}><option value="image_carousel">Hero Carousel</option><option value="text_carousel">Text Ticker</option></select></div>
-                        <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Theme</label><select value={formData.color_scheme || 'green'} onChange={e => setFormData({...formData, color_scheme: e.target.value as any})} className={modalInputStyles}><option value="green">Forest Green (Standard)</option><option value="beige">Classic Beige</option></select></div>
+        <div className="fixed inset-0 bg-black/85 z-[100] flex items-center justify-center p-4 backdrop-blur-md">
+            <div className="bg-[#FAF8F5] text-gray-900 rounded-[2.5rem] shadow-2xl w-full max-w-6xl border border-hav-gold/20 flex flex-col h-[90vh]">
+                
+                {/* Header */}
+                <div className="flex justify-between items-center px-8 py-5 border-b border-gray-200 flex-shrink-0 bg-white rounded-t-[2.5rem]">
+                    <div>
+                        <h3 className="text-2xl font-serif font-black text-hav-forest">Advanced Hero Banner & Infinite Moving Shelf Studio</h3>
+                        <p className="text-xs text-hav-gold font-bold tracking-tight uppercase">Upload visual assets, craft button target routes, and align overlays</p>
                     </div>
-                    <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Heading</label><input value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} className={modalInputStyles} /></div>
-                    <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Subtext</label><textarea value={formData.subtitle || ''} onChange={e => setFormData({...formData, subtitle: e.target.value})} className={modalInputStyles} rows={2} /></div>
-                    <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Visual Asset URL</label><input value={formData.image_url || ''} onChange={e => setFormData({...formData, image_url: e.target.value})} className={modalInputStyles} placeholder="https://..." /></div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Button Label</label><input value={formData.button_text || ''} onChange={e => setFormData({...formData, button_text: e.target.value})} className={modalInputStyles} /></div>
-                        <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Target Destination</label><input value={formData.button_link_page || ''} onChange={e => setFormData({...formData, button_link_page: e.target.value})} className={modalInputStyles} placeholder="/shop, /about, https://..." /></div>
-                    </div>
-                    <div><label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Display Order</label><input type="number" value={formData.sort_order} onChange={e => setFormData({...formData, sort_order: Number(e.target.value)})} className={modalInputStyles} /></div>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-all"><XIcon className="w-7 h-7 text-gray-400 hover:text-black"/></button>
                 </div>
-                <div className="mt-8 pt-8 border-t border-hav-gold/10 flex justify-end gap-4"><button onClick={onClose} className="px-8 py-3 text-xs font-black uppercase tracking-widest text-gray-400">Discard</button><button onClick={async () => { if(await onSave(formData, content?.id)) onClose(); }} className={primaryButtonStyles}>Save Component</button></div>
+
+                {/* Main Tab Container */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 flex-grow overflow-hidden">
+                    
+                    {/* Left Panel: Form controls */}
+                    <div className="lg:col-span-7 overflow-y-auto p-8 space-y-8 border-r border-gray-200 custom-scrollbar">
+                        
+                        {/* Section A: Live Banner Maker */}
+                        <div className="bg-white p-6 rounded-2xl border border-gray-200 space-y-5">
+                            <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+                                <span className="bg-hav-forest text-[#FCF2D5] text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wide">STUDIO A</span>
+                                <h4 className="text-sm font-black uppercase text-hav-forest font-sans">Visual Hero Banner Maker</h4>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Type</label>
+                                    <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value as any})} className={modalInputStyles}>
+                                        <option value="image_carousel">Hero Carousel Banner</option>
+                                        <option value="text_carousel">Moving Text Ticker (Ticker)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Theme Scheme</label>
+                                    <select value={formData.color_scheme || 'green'} onChange={e => setFormData({...formData, color_scheme: e.target.value as any})} className={modalInputStyles}>
+                                        <option value="green">Forest Green (Primary)</option>
+                                        <option value="beige">Classic Beige (Light Contrast)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Text Content Alignment</label>
+                                    <select value={formData.text_alignment} onChange={e => setFormData({...formData, text_alignment: e.target.value as any})} className={modalInputStyles}>
+                                        <option value="left">Left Aligned</option>
+                                        <option value="center">Centered</option>
+                                        <option value="right">Right Aligned</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Overlay Contrast Tint (% Darker)</label>
+                                    <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="80" 
+                                        value={formData.overlay_opacity} 
+                                        onChange={e => setFormData({...formData, overlay_opacity: Number(e.target.value)})} 
+                                        className="w-full"
+                                    />
+                                    <span className="text-[10px] text-gray-500 block text-right mt-0.5">{formData.overlay_opacity}% Contrast Mask</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Heading Text</label>
+                                <input value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} className={modalInputStyles} placeholder="e.g. Delicious Tradition" />
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Subtitle / Description</label>
+                                <textarea value={formData.subtitle || ''} onChange={e => setFormData({...formData, subtitle: e.target.value})} className={modalInputStyles} rows={2} placeholder="e.g. Handmade spices, fresh native sweets, natural pure oils" />
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Hero Image Address (URL)</label>
+                                <div className="flex gap-2">
+                                    <input value={formData.image_url || ''} onChange={e => setFormData({...formData, image_url: e.target.value})} className={modalInputStyles} placeholder="https://picsum.photos/800/600 or any image URL" />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Primary Button Text</label>
+                                    <input value={formData.button_text || ''} onChange={e => setFormData({...formData, button_text: e.target.value})} className={modalInputStyles} placeholder="e.g. Shop Now" />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Primary Button Target Page / Link</label>
+                                    <select value={formData.button_link_page || ''} onChange={e => setFormData({...formData, button_link_page: e.target.value})} className={modalInputStyles}>
+                                        <option value="">No Button Action</option>
+                                        <option value="shop">/shop (Main Store Page)</option>
+                                        <option value="combos">/combos (Premium Combos)</option>
+                                        <option value="recipes">/recipes (Traditional Culinary Recipes)</option>
+                                        <option value="blog">/blog (Stories & Posts)</option>
+                                        <option value="about">/about (How We Make It)</option>
+                                        <option value="influencer">/influencer (Affiliate Partner Portal)</option>
+                                    </select>
+                                    <p className="text-[10px] text-gray-500 mt-1 italic">Or enter a custom sub-page, specific page path, or external link directly below:</p>
+                                    <input value={formData.button_link_page || ''} onChange={e => setFormData({...formData, button_link_page: e.target.value})} className="mt-1 w-full border text-xs p-2 rounded" placeholder="https://wa.me/... or specific external link" />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Display Sequence Order</label>
+                                    <input type="number" value={formData.sort_order} onChange={e => setFormData({...formData, sort_order: Number(e.target.value)})} className={modalInputStyles} />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Carousel Duration (Seconds)</label>
+                                    <input type="number" value={formData.carousel_duration_seconds || 5} onChange={e => setFormData({...formData, carousel_duration_seconds: Number(e.target.value)})} className={modalInputStyles} />
+                                </div>
+                            </div>
+
+                            {formData.button_text && (
+                                <div className="space-y-3 bg-hav-cream/30 p-4 rounded-xl border border-hav-gold/10">
+                                    <label className="text-[10px] font-black uppercase text-hav-forest mb-1 block">Button Visual Drag Location (X/Y Offsets)</label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-[9px] font-bold text-gray-500 uppercase block">Horizontal (X): {buttonX}%</label>
+                                            <input 
+                                                type="range" 
+                                                min="0" 
+                                                max="100" 
+                                                value={buttonX} 
+                                                onChange={e => setFormData(prev => ({
+                                                    ...prev,
+                                                    button_link_context: {
+                                                        ...(prev.button_link_context || {}),
+                                                        custom_position: true,
+                                                        button_x: Number(e.target.value)
+                                                    }
+                                                }))}
+                                                className="w-full h-1 bg-gray-200 rounded-lg cursor-pointer"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] font-bold text-gray-500 uppercase block">Vertical (Y): {buttonY}%</label>
+                                            <input 
+                                                type="range" 
+                                                min="0" 
+                                                max="100" 
+                                                value={buttonY} 
+                                                onChange={e => setFormData(prev => ({
+                                                    ...prev,
+                                                    button_link_context: {
+                                                        ...(prev.button_link_context || {}),
+                                                        custom_position: true,
+                                                        button_y: Number(e.target.value)
+                                                    }
+                                                }))}
+                                                className="w-full h-1 bg-gray-200 rounded-lg cursor-pointer"
+                                            />
+                                        </div>
+                                    </div>
+                                    <span className="text-[9px] text-gray-400 block italic leading-none">• Drag the button directly on the preview to place it, or slide below.</span>
+                                </div>
+                            )}
+
+                            <div className="pt-2 flex justify-end">
+                                <button onClick={handleSaveBanner} className={`${primaryButtonStyles} w-full py-4 text-sm font-extrabold`}>
+                                    Save & Deploy Hero Banner
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Section B: Infinite Shelf Manager */}
+                        <div className="bg-white p-6 rounded-2xl border border-gray-200 space-y-5">
+                            <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+                                <span className="bg-[#C9A236] text-black text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wide">STUDIO B</span>
+                                <h4 className="text-sm font-black uppercase text-hav-forest font-sans">Infinite Moving Shelf & Floating Text Manager</h4>
+                            </div>
+
+                            <div className="flex items-center justify-between bg-hav-cream/20 p-4 rounded-xl border border-hav-gold/20">
+                                <div className="space-y-0.5 text-left">
+                                    <span className="text-xs font-black text-hav-forest block">Infinite Shelf Roll Status</span>
+                                    <span className="text-[11px] text-gray-500 block">Completely toggle on/off the entire visual product display section on the home page.</span>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={shelfConfig.isActive} 
+                                        onChange={e => setShelfConfig({...shelfConfig, isActive: e.target.checked})} 
+                                        className="sr-only peer"
+                                    />
+                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                </label>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Line 1 Floating Text</label>
+                                    <input value={shelfConfig.line1} onChange={e => setShelfConfig({...shelfConfig, line1: e.target.value})} className={modalInputStyles} placeholder="Line 1" />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Line 2 Floating Text</label>
+                                    <input value={shelfConfig.line2} onChange={e => setShelfConfig({...shelfConfig, line2: e.target.value})} className={modalInputStyles} placeholder="Line 2" />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Underlined Phrase / Highlight Target</label>
+                                <input value={shelfConfig.underlineText} onChange={e => setShelfConfig({...shelfConfig, underlineText: e.target.value})} className={modalInputStyles} placeholder="Text to receive dynamic swirl underline style" />
+                                <span className="text-[10px] text-gray-500 mt-1 block italic">Enter the exact word or sub-phrase from above to highlight with the hand-crafted dynamic gold pencil underline.</span>
+                            </div>
+
+                            <div className="border-t border-dashed border-gray-200 pt-4 space-y-4">
+                                <h5 className="text-[10px] font-black uppercase tracking-wider text-gray-500">Call to Action Button 1 (Order Today!)</h5>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Button text</label>
+                                        <input value={shelfConfig.btn1Text} onChange={e => setShelfConfig({...shelfConfig, btn1Text: e.target.value})} className={modalInputStyles} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Dest Page</label>
+                                        <select value={shelfConfig.btn1Page} onChange={e => setShelfConfig({...shelfConfig, btn1Page: e.target.value})} className={modalInputStyles}>
+                                            <option value="shop">shop</option>
+                                            <option value="combos">combos</option>
+                                            <option value="recipes">recipes</option>
+                                            <option value="about">about</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">External URL Link (Overrides target page if set)</label>
+                                    <input value={shelfConfig.btn1ExternalUrl} onChange={e => setShelfConfig({...shelfConfig, btn1ExternalUrl: e.target.value})} className={modalInputStyles} placeholder="https://..." />
+                                </div>
+                            </div>
+
+                            <div className="border-t border-dashed border-gray-200 pt-4 space-y-4">
+                                <h5 className="text-[10px] font-black uppercase tracking-wider text-gray-500">Call to Action Button 2 (Explore Bundles)</h5>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Button text</label>
+                                        <input value={shelfConfig.btn2Text} onChange={e => setShelfConfig({...shelfConfig, btn2Text: e.target.value})} className={modalInputStyles} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">Dest Page</label>
+                                        <select value={shelfConfig.btn2Page} onChange={e => setShelfConfig({...shelfConfig, btn2Page: e.target.value})} className={modalInputStyles}>
+                                            <option value="shop">shop</option>
+                                            <option value="combos">combos</option>
+                                            <option value="recipes">recipes</option>
+                                            <option value="about">about</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-hav-gold mb-1 block">External URL Link (Overrides target page if set)</label>
+                                    <input value={shelfConfig.btn2ExternalUrl} onChange={e => setShelfConfig({...shelfConfig, btn2ExternalUrl: e.target.value})} className={modalInputStyles} placeholder="https://..." />
+                                </div>
+                            </div>
+
+                            <button onClick={handleSaveShelfConfig} className="w-full py-3 bg-[#E9A02F] hover:bg-[#C93345] text-white font-extrabold uppercase tracking-widest text-[11px] rounded-full transition-all shadow">
+                                Sync Infinite Moving Shelf Config
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Right Panel: Interactive Visual Preview of the Banner */}
+                    <div className="lg:col-span-5 bg-gray-100 p-8 flex flex-col justify-between overflow-hidden">
+                        <div className="flex flex-col h-full justify-between space-y-8">
+                            <div className="text-left">
+                                <span className="text-[10px] uppercase font-black tracking-widest text-hav-gold/80 block">Visual WYSIWYG Sandbox</span>
+                                <h4 className="text-lg font-serif font-black text-gray-800">Dynamic Banner Composition Preview</h4>
+                            </div>
+
+                            {/* Canvas Sandbox Frame */}
+                            <div 
+                                ref={previewContainerRef}
+                                className="relative w-full aspect-[4/3] rounded-3xl bg-hav-forest text-white overflow-hidden shadow-inner border border-gray-300 flex flex-col items-center justify-center p-6 select-none bg-cover bg-center" 
+                                style={{ backgroundImage: formData.image_url ? `url(${formData.image_url})` : 'none' }}
+                            >
+                                {/* Contrast Mask */}
+                                <div className="absolute inset-0 bg-black" style={{ opacity: (formData.overlay_opacity || 20) / 100 }}></div>
+
+                                {/* Content overlay simulating aligned layout */}
+                                <div className={`relative z-10 w-full flex flex-col h-full justify-center max-w-sm ${formData.text_alignment === 'left' ? 'items-start text-left' : formData.text_alignment === 'right' ? 'items-end text-right' : 'items-center text-center'}`}>
+                                    <span className="text-[8px] bg-hav-gold text-hav-forest font-black px-1.5 py-0.5 rounded uppercase tracking-widest mb-2">
+                                        Live Preview
+                                    </span>
+                                    <h2 className="text-xl md:text-2xl font-serif font-black text-white leading-tight mb-2 drop-shadow-md">
+                                        {formData.title || "Traditional South Indian Gourmet"}
+                                    </h2>
+                                    <p className="text-[9px] text-white/80 leading-relaxed font-light mb-4 drop-shadow-md">
+                                        {formData.subtitle || "Experience pristine pure flavors made lovingly in Karnataka. Small-batch recipes with no preservatives."}
+                                    </p>
+                                </div>
+
+                                {formData.button_text && (
+                                    <motion.div
+                                        drag
+                                        dragMomentum={false}
+                                        dragElastic={0}
+                                        onDrag={(event, info) => {
+                                            if (previewContainerRef.current) {
+                                                const rect = previewContainerRef.current.getBoundingClientRect();
+                                                const xPercent = ((info.point.x - rect.left) / rect.width) * 100;
+                                                const yPercent = ((info.point.y - rect.top) / rect.height) * 100;
+                                                const boundedX = Math.round(Math.min(Math.max(xPercent, 0), 100));
+                                                const boundedY = Math.round(Math.min(Math.max(yPercent, 0), 100));
+                                                setFormData(prev => ({
+                                                    ...prev,
+                                                    button_link_context: {
+                                                        ...(prev.button_link_context || {}),
+                                                        custom_position: true,
+                                                        button_x: boundedX,
+                                                        button_y: boundedY
+                                                    }
+                                                }));
+                                            }
+                                        }}
+                                        className="absolute cursor-move active:cursor-grabbing z-30 select-none"
+                                        style={{
+                                            left: `${buttonX}%`,
+                                            top: `${buttonY}%`,
+                                            transform: 'translate(-50%, -50%)'
+                                        }}
+                                    >
+                                        <div className="px-4 py-1.5 bg-hav-gold hover:bg-white text-hav-forest font-black uppercase text-[8px] tracking-widest rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.5)] border border-white/20 select-none flex items-center gap-1 whitespace-nowrap">
+                                            <span>🎯 {formData.button_text}</span>
+                                            <span className="text-[6px] bg-black/10 text-hav-forest px-1 py-0.5 rounded uppercase font-sans font-bold">DRAG ME</span>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </div>
+
+                            {/* Info checklist for the user */}
+                            <div className="p-5 bg-white border rounded-2xl text-[11px] text-gray-600 leading-relaxed space-y-2 text-left shadow-xs">
+                                <p className="font-bold text-gray-800 uppercase tracking-wide">💡 Design Recommendations:</p>
+                                <p>• If using a busy background image, sliding the Contrast Tint to <b>35% or above</b> ensures complete contrast readibility.</p>
+                                <p>• Set target links to external structures (like <b>https://wa.me/8296925577</b>) to integrate customer service messaging seamlessly.</p>
+                                <p>• Save banner configurations, and then hit save on each row to update order positions sequentially.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                {/* Footer Controls */}
+                <div className="px-8 py-5 bg-gray-50 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0 rounded-b-[2.5rem]">
+                    <button onClick={onClose} className="px-6 py-3 bg-white border rounded-full text-xs font-black uppercase tracking-wider text-gray-400 hover:text-black transition-all">
+                        Cancel Sandbox
+                    </button>
+                </div>
+
             </div>
         </div>
     );
@@ -898,7 +1466,7 @@ export const OrderDetailsModal: React.FC<{
 export const CreateProductModal: React.FC<{ categories: Category[]; onClose: () => void; onSave: (p: ProductInsert, v: any[]) => Promise<boolean>; }> = ({ categories, onClose, onSave }) => {
     const [p, setP] = useState<ProductInsert>({ 
         id: '', name: '', tagline: '', description: '', gst_rate: 5, 
-        image_urls: [], is_vegan: false, is_sponsored: false, 
+        image_urls: [], is_vegan: false, is_sponsored: false, is_bestseller: false,
         spice_level: 'None', benefits: '', how_to_use: '', 
         ingredients: [], meta_title: '', meta_description: '', 
         meta_keywords: '', video_url: null 
@@ -941,6 +1509,11 @@ export const CreateProductModal: React.FC<{ categories: Category[]; onClose: () 
                                     <option value="Hot">Hot</option>
                                 </select>
                             </div>
+                            <div className="flex flex-wrap gap-6 pt-2">
+                                <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={p.is_vegan} onChange={e => setP({...p, is_vegan: e.target.checked})} className="w-4 h-4 accent-hav-forest"/><span className="text-xs font-bold text-hav-forest">Vegan</span></label>
+                                <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={p.is_sponsored} onChange={e => setP({...p, is_sponsored: e.target.checked})} className="w-4 h-4 accent-hav-forest"/><span className="text-xs font-bold text-hav-forest">Staff Pick</span></label>
+                                <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={p.is_bestseller} onChange={e => setP({...p, is_bestseller: e.target.checked})} className="w-4 h-4 accent-hav-forest"/><span className="text-xs font-bold text-hav-forest">Bestseller</span></label>
+                            </div>
                         </section>
 
                         <section className="bg-hav-orange-50/50 p-6 rounded-3xl border border-hav-gold/10 space-y-4">
@@ -962,6 +1535,11 @@ export const CreateProductModal: React.FC<{ categories: Category[]; onClose: () 
                                 <textarea value={p.meta_description || ''} onChange={e => setP({...p, meta_description: e.target.value})} className={modalInputStyles} placeholder="SEO Meta Description" rows={2} />
                                 <input value={p.meta_keywords || ''} onChange={e => setP({...p, meta_keywords: e.target.value})} className={modalInputStyles} placeholder="SEO Meta Keywords (comma separated)" />
                             </div>
+                        </section>
+
+                        <section className="bg-white p-6 rounded-3xl border border-hav-gold/20 shadow-sm space-y-4">
+                            <h4 className="text-[10px] font-black uppercase text-hav-forest tracking-widest">Product Images (URLs & Upload)</h4>
+                            <ProductImageManager imageUrls={p.image_urls || []} onChange={(urls) => setP({...p, image_urls: urls})} />
                         </section>
 
                         <section className="bg-white p-6 rounded-3xl border border-hav-gold/20 shadow-sm space-y-4">

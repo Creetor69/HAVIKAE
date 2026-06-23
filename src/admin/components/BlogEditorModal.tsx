@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import { XIcon } from './Icons';
 import { supabase } from '../supabaseClient';
 
+
 interface BlogEditorModalProps {
   post: BlogPost | null;
   onSave: (data: BlogPostInsert | BlogPostUpdate, id?: string) => Promise<boolean>;
@@ -66,28 +67,24 @@ const BlogEditorModal: React.FC<BlogEditorModalProps> = ({ post, onSave, onClose
         }
         setIsFetchingMeta(true);
         try {
-            const response = await fetch('/api/admin/fetch-metadata', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: formData.external_url })
-            });
-
+            const response = await fetch(`https://api.microlink.io?url=${encodeURIComponent(formData.external_url)}`);
             if (!response.ok) throw new Error("Metadata fetch failed");
             
-            const data = await response.json();
+            const rawData = await response.json();
+            const data = rawData.data;
 
             if (data) {
                 setFormData(prev => ({
                     ...prev,
                     title: prev.title || data.title,
                     content: prev.content || data.description || '',
-                    video_url: data.video || prev.video_url, 
-                    featured_image_url: data.image || prev.featured_image_url,
+                    video_url: data.video?.url || prev.video_url, 
+                    featured_image_url: data.image?.url || prev.featured_image_url,
                     external_meta: {
                         title: data.title || '',
                         description: data.description || '',
-                        image: data.image || '',
-                        site_name: data.source || new URL(formData.external_url).hostname
+                        image: data.image?.url || '',
+                        site_name: data.publisher || new URL(formData.external_url).hostname
                     }
                 }));
             }

@@ -1,5 +1,5 @@
 
-export type Page = 'home' | 'shop' | 'product' | 'about' | 'recipes' | 'contact' | 'login' | 'signup' | 'profile' | 'checkout' | 'recipeDetail' | 'admin' | 'wishlist' | 'compare' | 'legal' | 'combos' | 'influencer' | 'partners' | 'applyInfluencer' | 'sitemap' | 'social' | 'notFound';
+export type Page = 'home' | 'shop' | 'product' | 'about' | 'recipes' | 'contact' | 'login' | 'signup' | 'profile' | 'checkout' | 'recipeDetail' | 'admin' | 'wishlist' | 'compare' | 'legal' | 'combos' | 'influencer' | 'partners' | 'applyInfluencer' | 'sitemap' | 'social' | 'notFound' | 'cart';
 export type PageContext = { productId?: string; recipeId?: string; category?: string; documentId?: string; blogPostSlug?: string; };
 
 export type StoreSettings = {
@@ -20,6 +20,8 @@ export type StoreSettings = {
     carousel_theme?: 'green' | 'beige' | null;
     background_color?: string | null;
     carousel_background_color?: string | null;
+    is_banner_carousel_enabled?: boolean | null;
+    global_banner_duration?: number | null;
     razorpay_key_id?: string | null;
     email?: string | null;
     mobile?: string | null;
@@ -57,8 +59,9 @@ export type Product = {
     category_id: string | null;
     spice_level: 'Mild' | 'Medium' | 'Hot' | 'None' | null;
     is_vegan: boolean;
-    is_sponsored: boolean;
+    is_sponsored?: boolean;
     is_active: boolean; 
+    is_bestseller?: boolean;
     ingredients: string[] | null;
     how_to_use: string | null;
     benefits: string | null;
